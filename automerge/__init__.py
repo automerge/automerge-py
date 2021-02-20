@@ -40,8 +40,10 @@ class Doc(collections.MutableMapping):
         return value
 
     def __setitem__(self, key, item):
-        pass
-
+        path = [key]
+        change = self.frontend.set_at_path(path, item)
+        self.changes.append(change)
+    
     def __delitem__(self, key):
         pass
 
