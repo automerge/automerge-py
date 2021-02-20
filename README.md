@@ -12,7 +12,7 @@ Building uses PyO3's project _Maturin_
 # Install Maturin 
 pip install maturin
 
-# Build the project
-maturin build
+# Build the project and install it as a python module 
+maturin develop
 
 ```
