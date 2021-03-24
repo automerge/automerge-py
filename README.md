@@ -16,3 +16,12 @@ pip install maturin
 maturin develop
 
 ```
+
+## Run
+
+Run an example test script :
+```sh
+
+python tests/wip_dev.py
+```
+
