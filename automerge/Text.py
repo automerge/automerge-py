@@ -32,19 +32,15 @@ class Text():
         return len(self.elems)
 
     def __getitem__(self, key):
-        print("Text > get item ", key)
-        # bp()
         return self.elems[key]
 
     def __setitem__(self, key, item):
         '''
         Updates the list item at position `index` to a new value `value`.
         '''
-        print("Text > set item ", key, item)
         if self.context:
-            # TODO Context
-            # this.context.setListIndex(self.object_id, key, value)
-            pass
+            self.context.splice(self.object_id,  key, 1, [{"value": item}])
+
         elif not self.object_id:
             self.elems[key] = item
         else:
@@ -54,19 +50,18 @@ class Text():
 
     def __delitem__(self, key):
         '''
-        Deletes `numDelete` list items starting at position `index`.
-        if `numDelete` is not given, one item is deleted.
+        Deletes items at position `key`.
         '''
         if self.context:
-            # TODO Context
-            # this.context.splice(this[OBJECT_ID], index, numDelete, [])
-            pass
+            self.context.splice(self.object_id,  key, 1, [])
+
         elif self.object_id is None:
             # TODO : test performances
             del self.elems[key]
         else:
             # TODO : Error handling
             # throw new TypeError('Automerge.Text object cannot be modified outside of a change block')
+
             pass
 
     def insert(self, index, values):
@@ -74,9 +69,12 @@ class Text():
         Inserts new list items `values` starting at position `index`.
         '''
         if self.context:
-            # TODO Context
-            # self.context.splice(self.object_id)
-            pass
+
+            if isinstance(values, str):
+                values = [{'value': v} for v in values]
+
+            self.context.splice(self.object_id,  index, 0, values)
+
         elif self.object_id is None:
             # TODO : test performances
 

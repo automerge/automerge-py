@@ -1,18 +1,17 @@
 from typing import List, Any, Dict
 from .Text import Text
 from .Counter import Counter
+
 import uuid
 
 from .ApplyPatch import apply_diffs
-
-from pdb import set_trace as bp
 
 
 class Context():
     actor_id: str = None
     cache: Any  # Document
     updated: Dict = {}
-    inbound: Any = None
+    inbound: Dict = {}
     ops: List = []
     diffs: List = []
 
@@ -40,8 +39,18 @@ class Context():
             raise Exception(f'Target object does not exist: {object_id}')
 
     def get_object_field(self, object_id, key):
-        # TODO
-        pass
+        print("Context > get_object_field", object_id, key)
+
+        obj = self.get_object(object_id)
+
+        if isinstance(obj, Counter):
+            # TODO
+            pass
+        else:
+            result = obj[key]
+            result.context = self
+            return result
+            return dict(obj)[key]
 
     def create_nested_objects(self, value):
 
@@ -97,7 +106,6 @@ class Context():
             return {"value": value}
 
         else:
-
             child_id = self.create_nested_objects(value)
 
             op = {'action': 'link',
@@ -110,15 +118,18 @@ class Context():
 
     def set_map_key(self, object_id, type_, key: str, value):
 
-        bp()
         # TODO : check that key is a non-empty str
         obj = self.get_object(object_id)
         # TODO : test that obj is not a Counter
 
+        obj = dict(obj)
+
         # If the assigned field value is the same as the existing value, and
         # the assignment does not resolve a conflict, do nothing
+        if isinstance(obj, Dict) and (key not in obj or obj[key] != value) or \
+                not isinstance(obj, Dict) and obj[key] != value or \
+                obj.conflicts[key] or value is None:
 
-        if obj[key] != value or obj.conflicts[key] or value is None:
             # value_object is actually a dict. I just kept the same name than in the JS code.
             # TODO : rename value_object to value_dict
             value_object = self.set_value(object_id, key, value)
@@ -136,7 +147,6 @@ class Context():
         '''
         Inserts a new list element `value` at position `index` into the list with ID `objectId`.
         '''
-        print("Context > insert list item", index, value, object_id)
         lst = self.get_object(object_id)
         if index < 0 or index > len(lst):
             raise Exception(
