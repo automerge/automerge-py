@@ -138,6 +138,7 @@ class SaveAndLoad(unittest.TestCase):
         }
         encoded = []
         for change in [change1, change2, change3]:
+            print(change_hash(change))
             encoded.append(encode_change(change))
         s1 = PyBackend.create()
         s1.load_changes(encoded)
