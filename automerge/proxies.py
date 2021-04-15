@@ -1,26 +1,33 @@
 from collections.abc import MutableMapping
+from .datatypes import Map
 
 
 class MapProxy(MutableMapping):
-    def __init__(self, context, object_id, path, readonly=None):
-        self.context = context
-        self.object_id = object_id
+    def __init__(self, ctx, assoc_obj, path):
+        self.assoc_obj = assoc_obj
+        self.ctx = ctx
         self.path = path
-        self.readonly = readonly
 
     def __getitem__(self, key):
-        # As of commit 81079ff, the JS version has 3 checks
-        # for key === <A JS Symbol Object>.
-        # JS needs that to distinguish between user data
-        # and CRDencode_changeT metadata. (CRDT metadata is stored behind Symbols)
-        # We don't need those b/c all user data will be accessed
-        # through dict-style indexing (implemented with __getitem__)
-        # whereas CRDT metadata can be accessed as normal class fields
-        return self.context.get_object_field(self.path, self.object_id, key)
+        val = self.assoc_data[key]
+        new_path = self.path + [(key, self.assoc_obj.object_id)]
+        return get_maybe_proxy(self.ctx, val, new_path)
 
-    def __setitem__(self, key, value):
-        # TODO: readonly check
-        self.context.set_map_key(self.path, key, value)
+    def __setitem__(self, key, val):
+        if not isinstance(key, str):
+            raise Exception("TODO: msg")
+        setting_new_value = key not in self.assoc_obj
+        # TODO: Do better equals, conflict check
+        if setting_new_value or self.assoc_obj[key] != val:
+
+            def cb(subpatch):
+                preds = self.assoc_obj.get_pred(key)
+                (value_patch, op_id) = self.ctx.set_value(
+                    self.assoc_obj.object_id, key, val
+                )
+                subpatch["props"][key] = {op_id: value_patch}
+
+            self.ctx.apply_at_path(self.path, cb)
 
     def __delitem__(self, key):
         pass
@@ -30,3 +37,24 @@ class MapProxy(MutableMapping):
 
     def __len__(self):
         pass
+
+
+def is_primitive(val):
+    return (
+        val is None
+        or isinstance(val, str)
+        or isinstance(val, int)
+        or isinstance(val, bool)
+    )
+
+
+def get_maybe_proxy(context, val, path):
+    if isinstance(val, Map):
+        return MapProxy(context, val, path)
+    else:
+        if not is_primitive(val):
+            raise ValueError(
+                f"Value: {val} is not a valid Automerge datatype (str, int, bool, None)"
+            )
+        # Primitives don't need proxies since you can't mutate them, only re-assign them
+        return primitive
