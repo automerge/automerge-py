@@ -15,6 +15,7 @@ class Doc(MutableMapping):
         self.ctx = None
         self.seq = 0
         self.max_op = 0
+        self.changes = []
 
         self.root_obj = Map([], "_root", {})
         if initial_data:
@@ -26,26 +27,26 @@ class Doc(MutableMapping):
         return self.root_obj[key]
 
     def __delitem__(self, key):
-        pass
+        raise Exception(
+            f"Cannot delete directly on a document. Use a change block. (Tried deleting {key})"
+        )
 
     def __iter__(self):
         return self.root_obj.__iter__()
 
     def __len__(self):
-        pass
+        return self.root_obj.__len__()
 
     def __setitem__(self, key, val):
-        pass
+        raise Exception(
+            f"Cannot assign directly on a document. Use a change block. (Tried assigning {key} to {val})"
+        )
 
     def __enter__(self):
         self.ctx = Context(0, self.actor_id, self.root_obj)
         return MapProxy(self.ctx, self.root_obj, [])
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # print(self.ctx.ops)
-        pass
-
-    def change(self):
         self.seq += 1
         change = {
             "actor": self.actor_id,
@@ -57,8 +58,4 @@ class Doc(MutableMapping):
             "message": "",
         }
         self.max_op = self.max_op + len(self.ctx.ops)
-        return change
-
-
-# return proxies
-# proxies are just wrappers around the current object
+        self.changes.append(change)

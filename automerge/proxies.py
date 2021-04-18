@@ -9,9 +9,8 @@ class MapProxy(MutableMapping):
         self.path = path
 
     def __getitem__(self, key):
-        val = self.assoc_data[key]
-        new_path = self.path + [(key, self.assoc_obj.object_id)]
-        return get_maybe_proxy(self.ctx, val, new_path)
+        val = self.assoc_obj[key]
+        return get_maybe_proxy(self.ctx, key, val, self.path)
 
     def __setitem__(self, key, val):
         if not isinstance(key, str):
@@ -30,7 +29,23 @@ class MapProxy(MutableMapping):
             self.ctx.apply_at_path(self.path, cb)
 
     def __delitem__(self, key):
-        pass
+        if not isinstance(key, str):
+            raise Exception("TODO: msg")
+        if key not in self.assoc_obj:
+            raise KeyError(key)
+        preds = self.assoc_obj.get_pred(key)
+        self.ctx.add_op(
+            action="del",
+            obj=self.assoc_obj.object_id,
+            key=key,
+            insert=False,
+            pred=preds,
+        )
+
+        def cb(subpatch):
+            subpatch["props"][key] = {}
+
+        self.ctx.apply_at_path(self.path, cb)
 
     def __iter__(self):
         pass
@@ -48,9 +63,10 @@ def is_primitive(val):
     )
 
 
-def get_maybe_proxy(context, val, path):
+def get_maybe_proxy(context, key, val, old_path):
+    new_path = old_path + [(key, val.object_id)]
     if isinstance(val, Map):
-        return MapProxy(context, val, path)
+        return MapProxy(context, val, new_path)
     else:
         if not is_primitive(val):
             raise ValueError(

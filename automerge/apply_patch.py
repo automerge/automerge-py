@@ -53,9 +53,6 @@ def apply_properties(obj, props):
         for op_id in op_ids:
             subpatch = val[op_id]
             if key in recent_ops and op_id in recent_ops[key]:
-                # Oh another question :stuck_out_tongue: , I'm trying to understand when the first case of this if statement would be taken.
-                # Theoretically, there should never be 2 ops with the same id right? Since actor ids are supposed to be unique.
-                # So not sure when a patch would have an op id that would already exist in an object's conflicts.
                 values[op_id] = get_value(recent_ops[key][op_id], subpatch)
             else:
                 values[op_id] = get_value(Map([], op_id), subpatch)

@@ -54,6 +54,7 @@
 # ```
 
 from .apply_patch import apply_patch
+from .datatypes import Map
 
 # TODO: For now, only works on primitives
 def get_value_description(val):
@@ -101,7 +102,7 @@ class Context:
     def get_subpatch(self, patch, path):
         """
         Traverse along `path` into `patch`, creating nodes along the way as needed
-        by mutuating `patch`. Returns the subpatch at the given path.
+        by mutating `patch`. Returns the subpatch at the given path.
         TODO: Clarify this description, it might be one above the given path
         """
         subpatch, obj = patch["diffs"], self.root_obj
@@ -109,7 +110,8 @@ class Context:
             assert "props" not in subpatch
             subpatch["props"] = {key: self.get_values_descriptions(obj, key)}
 
-            next_op_id, values = None, subpatch["props"][path_fragment]
+            # breakpoint()
+            next_op_id, values = None, subpatch["props"][key]
             for op_id in values.keys():
                 if op_id == object_id:
                     next_op_id = object_id
@@ -134,12 +136,10 @@ class Context:
         patch = {"diffs": {"objectId": "_root", "type": "map"}}
         # If `path` is at `root["a"]["b"]` then
         # `get_subpatch` will mutate `patch` and return the value at path
-        # `patch["diffs"]["props"]["a"][<op_id>]["props"]
+        # `patch["diffs"]["props"]["a"][<op_id>]`
         subpatch = self.get_subpatch(patch, path)
         init_subpatch(subpatch)
-        # breakpoint()
-        # breakpoint()
-        apply_patch(self.root_obj, subpatch)
+        apply_patch(self.root_obj, patch["diffs"])
 
     def set_value(self, parent_obj_id, key, val, **op_params):
         """
@@ -192,8 +192,13 @@ class Context:
             return (description, set_value_op_id)
 
     def add_op(self, **op):
+        if "pred" not in op:
+            op["pred"] = []
+        if "insert" not in op:
+            op["insert"] = False
         # TODO: Do some verification of the op here
         # TODO: Do some data normalization, there will be situations where key is None
         # so we should be looking @ elemid etc..
+
         self.ops.append(op)
         return f"{self.max_op + len(self.ops)}@{self.actor_id}"

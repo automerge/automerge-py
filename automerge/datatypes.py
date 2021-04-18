@@ -13,4 +13,4 @@ class Map(dict):
         self.recent_ops = recent_ops
 
     def get_pred(self, key):
-        return self.recent_ops[key] if key in self.recent_ops else []
+        return list(self.recent_ops[key].keys()) if key in self.recent_ops else []
