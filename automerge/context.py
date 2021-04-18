@@ -53,6 +53,8 @@
 #  <a bunch of closing braces...>
 # ```
 
+from typing import Any, TypedDict
+
 from .apply_patch import apply_patch
 from .datatypes import Map
 
@@ -62,8 +64,8 @@ def get_value_description(val):
 
 
 class Context:
-    def __init__(self, max_op, actor_id, root_obj):
-        self.ops = []
+    def __init__(self, max_op: int, actor_id: str, root_obj: Map):
+        self.ops: list[Any] = []
         self.max_op = max_op
         self.actor_id = actor_id
         self.root_obj = root_obj
@@ -103,14 +105,12 @@ class Context:
         """
         Traverse along `path` into `patch`, creating nodes along the way as needed
         by mutating `patch`. Returns the subpatch at the given path.
-        TODO: Clarify this description, it might be one above the given path
         """
         subpatch, obj = patch["diffs"], self.root_obj
         for (key, object_id) in path:
             assert "props" not in subpatch
             subpatch["props"] = {key: self.get_values_descriptions(obj, key)}
 
-            # breakpoint()
             next_op_id, values = None, subpatch["props"][key]
             for op_id in values.keys():
                 if op_id == object_id:
@@ -129,14 +129,19 @@ class Context:
         Constructs a patch for a change at `path` and then immediately applies
         the patch to the document.
 
-        TODO: This strategy is inefficient b/c every update inside a change block
+        NOTE: This strategy is inefficient b/c every update inside a change block
         causes a traversal from the root object to the location of the update in order
-        to create a subpatch.
+        to create a subpatch. And the subpatch application is slow as well.
         """
         patch = {"diffs": {"objectId": "_root", "type": "map"}}
-        # If `path` is at `root["a"]["b"]` then
-        # `get_subpatch` will mutate `patch` and return the value at path
-        # `patch["diffs"]["props"]["a"][<op_id>]`
+        # If the change is `root.foo = "bar"` then
+        # - `path` = []
+        # - `get_subpatch` will do patch["diffs"]["props"] = {}
+
+        # If change is `root.foo.bar = "baz"` then
+        # - `path` = [(foo, "<foo object id>")]
+        # - `get_subpatch` will do patch["diffs"]["foo"]["props"] = {}
+        #       (also creating the dict @ patch["diffs"]["foo"])
         subpatch = self.get_subpatch(patch, path)
         init_subpatch(subpatch)
         apply_patch(self.root_obj, patch["diffs"])
@@ -145,7 +150,6 @@ class Context:
         """
         - Returns a patch that represents creating the Python value `val`
           that is immediately applied to the frontend. This is necessary so the following will work inside a change block:
-        - Also returns the op id of the op that created `val`
           ```
           # `val` is {'b': 42}
           foo.a = {'b': 42}
@@ -153,12 +157,13 @@ class Context:
           # nothing has been sent to the backend but we can still access `foo.a.b`
           foo.a.b = 43
           ```
+        - Returns the op id of the op that created `val`
         - Adds the necessary ops to the change context to generate the final change that is sent to the backend
 
-        `parent_obj_id`: TODO
-        `key`: TODO
-        `val`: TODO
-        `op_params`: TODO
+        `parent_obj_id`: The object id of the object that will contain this key/val pair
+        `key`: The key to set at the path
+        `val`: The value to set at the key
+        `op_params`: Data that will be in the final op
         """
 
         if key == "":

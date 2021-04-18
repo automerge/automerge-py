@@ -6,6 +6,8 @@ class MapProxy(MutableMapping):
     def __init__(self, ctx, assoc_obj, path):
         self.assoc_obj = assoc_obj
         self.ctx = ctx
+        # The path is used when mutating values through sets/deletes
+        # It is the location of `assoc_obj` in the CRDT's state tree.
         self.path = path
 
     def __getitem__(self, key):
@@ -16,7 +18,7 @@ class MapProxy(MutableMapping):
         if not isinstance(key, str):
             raise Exception("TODO: msg")
         setting_new_value = key not in self.assoc_obj
-        # TODO: Do better equals, conflict check
+        # TODO: Do better equals & implement conflict check
         if setting_new_value or self.assoc_obj[key] != val:
 
             def cb(subpatch):
@@ -48,10 +50,10 @@ class MapProxy(MutableMapping):
         self.ctx.apply_at_path(self.path, cb)
 
     def __iter__(self):
-        pass
+        raise Exception("not yet supported")
 
     def __len__(self):
-        pass
+        return self.assoc_obj.__len__()
 
 
 def is_primitive(val):

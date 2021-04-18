@@ -1,3 +1,5 @@
+from typing import Optional, Any
+
 import uuid
 from collections.abc import MutableMapping
 from .proxies import MapProxy
@@ -6,7 +8,11 @@ from .datatypes import Map
 
 
 class Doc(MutableMapping):
-    def __init__(self, actor_id=None, initial_data=None):
+    def __init__(
+        self,
+        actor_id: Optional[str] = None,
+        initial_data: Optional[dict[Any, Any]] = None,
+    ) -> None:
         if actor_id is None:
             # QUESTION: Why do we remove "-"?
             actor_id = str(uuid.uuid4()).replace("-", "")
@@ -15,7 +21,7 @@ class Doc(MutableMapping):
         self.ctx = None
         self.seq = 0
         self.max_op = 0
-        self.changes = []
+        self.changes: list[Any] = []
 
         self.root_obj = Map([], "_root", {})
         if initial_data:
