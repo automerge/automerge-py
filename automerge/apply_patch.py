@@ -12,7 +12,7 @@ def parse_op_id(op_id):
     if not match:
         # TODO: proper exception type
         raise Exception(f"Not a valid op_id: {op_id}")
-    return OpId(int(match.group(1), match.group(2)))
+    return OpId(int(match.group(1)), match.group(2))
 
 
 def lamport_compare(ts1, ts2):
@@ -25,7 +25,7 @@ def lamport_compare(ts1, ts2):
     if time1.counter != time2.counter:
         return time1.counter - time2.counter
     if time1.actorId != time2.actorId:
-        return time1.actorId - time2.actorId
+        return 1 if time1.actorId > time2.actorId else -1
     return 0
 
 
@@ -44,26 +44,33 @@ def get_value(conflict, patch):
 
 
 def apply_properties(obj, props):
-    recent_ops = obj.recent_ops
-    for key, val in props.items():
-        values, op_ids = {}, list(val.keys())
-        op_ids.sort(key=cmp_to_key(lamport_compare))
-        op_ids.reverse()
+    our_recent_ops = obj.recent_ops
+    for key, patch_recent_ops in props.items():
+        values, patch_op_ids = {}, list(patch_recent_ops.keys())
+        patch_op_ids.sort(key=cmp_to_key(lamport_compare))
+        patch_op_ids.reverse()
 
-        for op_id in op_ids:
-            subpatch = val[op_id]
-            if key in recent_ops and op_id in recent_ops[key]:
-                values[op_id] = get_value(recent_ops[key][op_id], subpatch)
+        for patch_op_id in patch_op_ids:
+            subpatch = patch_recent_ops[patch_op_id]
+            if key in our_recent_ops and patch_op_id in our_recent_ops[key]:
+                values[patch_op_id] = get_value(
+                    our_recent_ops[key][patch_op_id], subpatch
+                )
             else:
-                values[op_id] = get_value(Map([], op_id), subpatch)
+                v = None
+                if "objectId" in subpatch:
+                    v = get_value(Map([], subpatch["objectId"]), subpatch)
+                else:
+                    v = get_value(None, subpatch)
+                values[patch_op_id] = v
 
-        if len(op_ids) == 0:
+        if len(patch_op_ids) == 0:
             # an empty subpatch signals "delete"
             del obj[key]
-            del recent_ops[key]
+            del our_recent_ops[key]
         else:
-            obj[key] = values[op_ids[0]]
-            recent_ops[key] = values
+            obj[key] = values[patch_op_ids[0]]
+            our_recent_ops[key] = values
 
 
 def apply_patch(obj, patch):

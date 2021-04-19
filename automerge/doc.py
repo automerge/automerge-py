@@ -4,6 +4,7 @@ import uuid
 from collections.abc import MutableMapping
 from .proxies import MapProxy
 from .context import Context
+from .apply_patch import apply_patch
 from .datatypes import Map
 
 
@@ -28,6 +29,9 @@ class Doc(MutableMapping):
             with self as d:
                 for (k, v) in initial_data.items():
                     d[k] = v
+
+    def apply_patch(self, patch):
+        self.root_obj = apply_patch(self.root_obj, patch["diffs"])
 
     def __getitem__(self, key):
         return self.root_obj[key]

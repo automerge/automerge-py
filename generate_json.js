@@ -362,6 +362,7 @@ const tests = {
               props: {
                 birds: {
                   "1@2a1d376b24f744008d4af58252d644dd": {
+                    // TODO: Does this make sense? Shouldn't the object id be 1@...?
                     objectId: "2@2a1d376b24f744008d4af58252d644dd",
                     type: "map",
                     props: {
