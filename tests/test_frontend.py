@@ -19,7 +19,9 @@ def run_test(self, steps, name):
                 kwargs["actor_id"] = params["actor_id"]
             doc_ = doc.Doc(**kwargs)
         elif typ == "assert_doc_equal":
-            self.assertEqual(doc_, step["to"])
+            # Could use `doc_` instead of `doc_.root_obj`
+            # but this would make error messages less nice
+            self.assertEqual(doc_.root_obj, step["to"])
         elif typ == "change_doc":
             with doc_ as d:
                 for edit in step["trace"]:
@@ -43,6 +45,10 @@ def run_test(self, steps, name):
             # The time is the one value that is non-deterministic
             change["time"] = 0
             self.assertEqual(change, step["to"])
+        elif typ == "apply_patch":
+            doc_.apply_patch(step["patch"])
+        elif typ == "assert_conflicts_equal":
+            print("asserting!")
         else:
             raise Exception(f"Unknown step type: {typ}")
 
