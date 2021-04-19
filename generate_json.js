@@ -247,6 +247,306 @@ const tests = {
       ],
     },
   ],
+  // SKIP: should structure share unmodified objects
+  "applying patches": [
+    {
+      name: "should set root object properties",
+      steps: [
+        { type: "create_doc" },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { "02ef21f3c9eb4087880ebedd7c4bbe43": 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                bird: {
+                  "1@02ef21f3c9eb4087880ebedd7c4bbe43": { value: "magpie" },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: {
+            bird: "magpie",
+          },
+        },
+      ],
+    },
+    {
+      name: "should reveal conflicts on root object properties",
+      steps: [
+        { type: "create_doc" },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: {
+              "02ef21f3c9eb4087880ebedd7c4bbe43": 1,
+              "2a1d376b24f744008d4af58252d644dd": 2,
+            },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                favoriteBird: {
+                  "1@02ef21f3c9eb4087880ebedd7c4bbe43": { value: "robin" },
+                  "1@2a1d376b24f744008d4af58252d644dd": { value: "wagtail" },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: {
+            favoriteBird: "wagtail",
+          },
+        },
+        {
+          type: "assert_conflicts_equal",
+          path: ["favoriteBird"],
+          to: {
+            "1@02ef21f3c9eb4087880ebedd7c4bbe43": "robin",
+            "1@2a1d376b24f744008d4af58252d644dd": "wagtail",
+          },
+        },
+      ],
+    },
+    {
+      name: "should create nested maps",
+      steps: [
+        { type: "create_doc" },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { "2a1d376b24f744008d4af58252d644dd": 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                birds: {
+                  "1@2a1d376b24f744008d4af58252d644dd": {
+                    objectId: "2@2a1d376b24f744008d4af58252d644dd",
+                    type: "map",
+                    props: {
+                      wrens: {
+                        "2@2a1d376b24f744008d4af58252d644dd": { value: 3 },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: { birds: { wrens: 3 } },
+        },
+      ],
+    },
+    {
+      name: "should apply updates inside nested maps",
+      steps: [
+        { type: "create_doc" },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { "2a1d376b24f744008d4af58252d644dd": 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                birds: {
+                  "1@2a1d376b24f744008d4af58252d644dd": {
+                    objectId: "2@2a1d376b24f744008d4af58252d644dd",
+                    type: "map",
+                    props: {
+                      wrens: {
+                        "2@2a1d376b24f744008d4af58252d644dd": { value: 3 },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: { birds: { wrens: 3 } },
+        },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { "2a1d376b24f744008d4af58252d644dd": 2 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                birds: {
+                  "1@2a1d376b24f744008d4af58252d644dd": {
+                    objectId: "2@2a1d376b24f744008d4af58252d644dd",
+                    type: "map",
+                    props: {
+                      sparrows: {
+                        "3@2a1d376b24f744008d4af58252d644dd": { value: 15 },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: { birds: { wrens: 3, sparrows: 15 } },
+        },
+      ],
+    },
+    {
+      name: "should apply updates inside map key conflicts",
+      steps: [
+        { type: "create_doc" },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: {
+              "02ef21f3c9eb4087880ebedd7c4bbe43": 1,
+              "2a1d376b24f744008d4af58252d644dd": 1,
+            },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                favoriteBirds: {
+                  "1@02ef21f3c9eb4087880ebedd7c4bbe43": {
+                    objectId: "1@02ef21f3c9eb4087880ebedd7c4bbe43",
+                    type: "map",
+                    props: {
+                      blackbirds: {
+                        "2@02ef21f3c9eb4087880ebedd7c4bbe43": { value: 1 },
+                      },
+                    },
+                  },
+                  "1@2a1d376b24f744008d4af58252d644dd": {
+                    objectId: "1@2a1d376b24f744008d4af58252d644dd",
+                    type: "map",
+                    props: {
+                      wrens: {
+                        "2@2a1d376b24f744008d4af58252d644dd": { value: 3 },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: { favoriteBirds: { wrens: 3 } },
+        },
+        {
+          type: "assert_conflicts_equal",
+          to: {
+            "1@02ef21f3c9eb4087880ebedd7c4bbe43": { blackbirds: 1 },
+            "1@2a1d376b24f744008d4af58252d644dd": { wrens: 3 },
+          },
+        },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: {
+              "02ef21f3c9eb4087880ebedd7c4bbe43": 2,
+              "2a1d376b24f744008d4af58252d644dd": 1,
+            },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                favoriteBirds: {
+                  "1@02ef21f3c9eb4087880ebedd7c4bbe43": {
+                    objectId: "1@02ef21f3c9eb4087880ebedd7c4bbe43",
+                    type: "map",
+                    props: {
+                      blackbirds: {
+                        "3@02ef21f3c9eb4087880ebedd7c4bbe43": { value: 2 },
+                      },
+                    },
+                  },
+                  "1@2a1d376b24f744008d4af58252d644dd": {
+                    objectId: "1@02ef21f3c9eb4087880ebedd7c4bbe43",
+                    type: "map",
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: {
+            favoriteBirds: { wrens: 3 },
+          },
+        },
+        {
+          type: "assert_conflicts_equal",
+          to: {
+            "1@02ef21f3c9eb4087880ebedd7c4bbe43": { blackbirds: 2 },
+            "1@2a1d376b24f744008d4af58252d644dd": { wrens: 3 },
+          },
+        },
+      ],
+    },
+    {
+      name: "delete keys in maps",
+      steps: [
+        { type: "create_doc" },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { "02ef21f3c9eb4087880ebedd7c4bbe43": 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                magpies: { "1@02ef21f3c9eb4087880ebedd7c4bbe43": { value: 2 } },
+                sparrows: {
+                  "2@02ef21f3c9eb4087880ebedd7c4bbe43": { value: 15 },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: { magpies: 2, sparrows: 15 },
+        },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { "02ef21f3c9eb4087880ebedd7c4bbe43": 2 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                magpies: {},
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: { sparrows: 15 },
+        },
+      ],
+    },
+  ],
 };
 
 const json = JSON.stringify(tests, null, 2);
