@@ -29,5 +29,4 @@ class List(list):
         self.recent_ops = recent_ops
 
     def get_pred(self, idx):
-        # TODO
-        return []
+        return list(self.recent_ops[idx].keys()) if idx < len(self.recent_ops) else []

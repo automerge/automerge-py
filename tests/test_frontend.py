@@ -12,6 +12,24 @@ def goto_path(obj, path):
     return temp
 
 
+KEY_TO_INT_SIGNAL = "KEYTOINT:"
+
+
+def destringify_keys(d):
+    if isinstance(d, dict):
+        for k in list(d.keys()):
+            v = d[k]
+            if k.startswith(KEY_TO_INT_SIGNAL):
+                s_int = k[len(KEY_TO_INT_SIGNAL) :]
+                k_as_int = int(s_int)
+                d[k_as_int] = v
+                del d[k]
+            destringify_keys(v)
+    elif isinstance(d, list):
+        for v in d:
+            destringify_keys(v)
+
+
 def run_test(self, steps, name):
     doc_ = change = None
 
@@ -36,17 +54,9 @@ def run_test(self, steps, name):
                     if edit_typ == "set":
                         path, value = edit["path"], edit["value"]
                         goto_path(d, path)[path[-1]] = value
-                        # temp = d
-                        # for segment in path[:-1]:
-                        #    temp = temp[segment]
-                        # temp[path[-1]] = value
                     elif edit_typ == "delete":
                         path = edit["path"]
                         del goto_path(d, path)[path[-1]]
-                        # temp = d
-                        # for segment in path[:-1]:
-                        #    temp = temp[segment]
-                        # del temp[path[-1]]
                     elif edit_typ == "insert":
                         path = edit["path"]
                         array = goto_path(d, path)
@@ -59,6 +69,8 @@ def run_test(self, steps, name):
             change["time"] = 0
             self.assertEqual(change, step["to"])
         elif typ == "apply_patch":
+            # breakpoint()
+            destringify_keys(step["patch"])
             doc_.apply_patch(step["patch"])
         elif typ == "assert_conflicts_equal":
             to, path = step["to"], step["path"]
@@ -75,27 +87,26 @@ def create_test_wrapper(steps, name):
     return wrapper
 
 
+# SECTION_MATCH = "apply"
+# TEST_MATCH = "inside_list_element_conflicts"
+SECTION_MATCH = None
+TEST_MATCH = None
+
 with open("frontend_tests.json", "r") as f:
     tests = json.loads(f.read())
-    skip = False
     for (section_name, section_tests) in tests.items():
-        if not skip:
-            skip = True
+        if SECTION_MATCH and SECTION_MATCH not in section_name:
             continue
         test_methods = {}
         for test in section_tests:
             name = test["name"].replace(" ", "_")
             name = f"test_{name}"
-            test_methods[name] = create_test_wrapper(test["steps"], name)
+            if (not TEST_MATCH) or (TEST_MATCH in name):
+                test_methods[name] = create_test_wrapper(test["steps"], name)
         section_name = section_name.replace(" ", "_")
         section_name = section_name.upper()
-        assert len(test_methods) == len(section_tests)
         test_klass = type(section_name, (unittest.TestCase,), test_methods)
         globs = globals()
         globs[section_name] = test_klass
         # Prevent the tests in the last test group from running twice.
         test_klass = None
-
-
-if __name__ == "__main__":
-    unittest.main()

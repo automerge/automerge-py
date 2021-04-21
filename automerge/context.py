@@ -144,9 +144,6 @@ class Context:
         #       (also creating the dict @ patch["diffs"]["foo"])
         subpatch = self.get_subpatch(patch, path)
         init_subpatch(subpatch)
-        print("=======")
-        print(patch)
-        print("------")
         apply_patch(self.root_obj, patch["diffs"])
 
     def set_value(self, parent_obj_id, key, val, **op_params):
@@ -227,7 +224,8 @@ class Context:
         if "insert" not in op:
             op["insert"] = False
         if "elemId" in op:
-            del op["key"]
+            if "key" in op:
+                del op["key"]
 
         self.ops.append(op)
         return f"{self.max_op + len(self.ops)}@{self.actor_id}"

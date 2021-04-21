@@ -52,7 +52,13 @@ def apply_properties(obj, props):
 
         for patch_op_id in patch_op_ids:
             subpatch = patch_recent_ops[patch_op_id]
-            if key in our_recent_ops and patch_op_id in our_recent_ops[key]:
+            # breakpoint()
+            have_key_entry = (
+                key in our_recent_ops
+                if isinstance(our_recent_ops, dict)
+                else (key < len(our_recent_ops) and our_recent_ops[key])
+            )
+            if have_key_entry and (patch_op_id in our_recent_ops[key]):
                 values[patch_op_id] = get_value(
                     our_recent_ops[key][patch_op_id], subpatch
                 )
@@ -102,6 +108,7 @@ def apply_patch(obj, patch):
         apply_properties(obj, patch["props"])
         return obj
     elif patch["type"] == "list":
+        # breakpoint()
         update_list_obj(obj, patch["props"], patch["edits"])
         return obj
     else:

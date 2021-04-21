@@ -71,7 +71,7 @@ class ListProxy(MutableSequence):
         if idx < 0 or idx >= len(self.assoc_list):
             raise IndexError(idx)
         elem_id = self.assoc_list.elem_ids[idx]
-        preds = self.assoc_list.get_pred(elem_id)
+        preds = self.assoc_list.get_pred(idx)
 
         self.ctx.add_op(
             action="del",
@@ -82,7 +82,7 @@ class ListProxy(MutableSequence):
         )
 
         def cb(subpatch):
-            subpatch["props"][elem_id] = {}
+            subpatch["edits"] = [{"action": "remove", "index": idx}]
 
         self.ctx.apply_at_path(self.path, cb)
 
@@ -95,13 +95,22 @@ class ListProxy(MutableSequence):
 
         # TODO: check conflicts
         if self.assoc_list[idx] != val:
+            elem_id = self.assoc_list.elem_ids[idx]
+            preds = self.assoc_list.get_pred(idx)
 
             def cb(subpatch):
-                elem_id = self.assoc_list.elem_ids[idx]
-                preds = self.assoc_list.get_pred(elem_id)
-                (value_patch, op_id) = self.ctx.set
+                (value_patch, op_id) = self.ctx.set_value(
+                    self.assoc_list.object_id,
+                    idx,
+                    val,
+                    elemId=elem_id,
+                    insert=False,
+                    pred=preds,
+                )
+                subpatch["props"][idx] = {op_id: value_patch}
+                subpatch["edits"] = []
 
-            pass
+            self.ctx.apply_at_path(self.path, cb)
 
     # insert an element before the given idx
     # if idx >= len(self), insert at the end
@@ -113,7 +122,7 @@ class ListProxy(MutableSequence):
         elif idx < 0:
             idx = 0
         elem_id = "_head" if idx == 0 else self.assoc_list.elem_ids[idx - 1]
-        preds = self.assoc_list.get_pred(elem_id)
+        preds = self.assoc_list.get_pred(idx)
 
         def cb(subpatch):
             (value_patch, op_id) = self.ctx.set_value(
@@ -126,8 +135,6 @@ class ListProxy(MutableSequence):
             )
             subpatch["props"][idx] = {op_id: value_patch}
             subpatch["edits"] = [{"action": "insert", "index": idx, "elemId": op_id}]
-            # "chaffinch"print(subpatch['props'], subpatch['edits'])
-            # print("====")
 
         self.ctx.apply_at_path(self.path, cb)
 

@@ -7,8 +7,18 @@ const fs = require("fs");
 // everything in the expected value (since op ids are predictable if you know the actor id)
 // and just set timestamps to 0 before comparisons.
 
+// Caveats
+// 1. JSON doesn't support int keys, however patches for lists may use int keys. To solve this,
+// when deserializing a patch from JSON for "apply_patch", iterate through the keys, and if any
+// of them have the form "KEYTOINT:X", replace the key with the integer version of "X"
+// TODO: Should we just use YAML for the generated output instead?
+
 const actor_id = "1111111111111111";
 const actor = actor_id;
+
+// (from Rust version) actor1 < actor2
+const other_actor_1 = "02ef21f3c9eb4087880ebedd7c4bbe43";
+const other_actor_2 = "2a1d376b24f744008d4af58252d644dd";
 
 const tests = {
   // SKIPPED:
@@ -340,6 +350,77 @@ const tests = {
         },
       ],
     },
+    {
+      name: "should apply updates inside lists",
+      steps: [
+        {
+          type: "create_doc",
+          params: { actor_id, data: { birds: ["chaffinch"] } },
+        },
+        { type: "assert_doc_equal", to: { birds: ["chaffinch"] } },
+        {
+          type: "change_doc",
+          trace: [{ type: "set", path: ["birds", 0], value: "greenfinch" }],
+        },
+        { type: "assert_doc_equal", to: { birds: ["greenfinch"] } },
+        {
+          type: "assert_change_equal",
+          to: {
+            actor,
+            seq: 2,
+            time: 0,
+            message: "",
+            startOp: 3,
+            deps: [],
+            ops: [
+              {
+                obj: `1@${actor}`,
+                action: "set",
+                elemId: `2@${actor}`,
+                insert: false,
+                value: "greenfinch",
+                pred: [`2@${actor}`],
+              },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      name: "should delete list elements",
+      steps: [
+        { type: "create_doc", params: { actor_id } },
+        {
+          type: "change_doc",
+          trace: [
+            { type: "set", path: ["birds"], value: ["chaffinch", "goldfinch"] },
+          ],
+        },
+        { type: "assert_doc_equal", to: { birds: ["chaffinch", "goldfinch"] } },
+        { type: "change_doc", trace: [{ type: "delete", path: ["birds", 0] }] },
+        { type: "assert_doc_equal", to: { birds: ["goldfinch"] } },
+        {
+          type: "assert_change_equal",
+          to: {
+            actor,
+            seq: 2,
+            time: 0,
+            message: "",
+            startOp: 4,
+            deps: [],
+            ops: [
+              {
+                obj: `1@${actor}`,
+                action: "del",
+                elemId: `2@${actor}`,
+                insert: false,
+                pred: [`2@${actor}`],
+              },
+            ],
+          },
+        },
+      ],
+    },
   ],
   // SKIP: should structure share unmodified objects
   "applying patches": [
@@ -646,6 +727,217 @@ const tests = {
         {
           type: "assert_doc_equal",
           to: { sparrows: 15 },
+        },
+      ],
+    },
+    {
+      name: "should create lists",
+      steps: [
+        { type: "create_doc", params: { actor_id } },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { [actor_id]: 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                birds: {
+                  [`1@${actor}`]: {
+                    objectId: `1@${actor}`,
+                    type: "list",
+                    // The JS version is missing an "elemId" prop here, but the test passes.
+                    // I think this is luck, not intention, since the elemId ends up being undefined (which is def. wrong)
+                    edits: [
+                      { action: "insert", index: 0, elemId: `2@${actor_id}` },
+                    ],
+                    props: {
+                      "KEYTOINT:0": {
+                        [`2@${actor_id}`]: { value: "chaffinch" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        { type: "assert_doc_equal", to: { birds: ["chaffinch"] } },
+      ],
+    },
+    {
+      name: "should apply updates inside lists",
+      steps: [
+        { type: "create_doc", params: { actor_id } },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { actor_id: 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                birds: {
+                  [`1@${actor_id}`]: {
+                    objectId: `1@${actor_id}`,
+                    type: "list",
+                    edits: [
+                      { action: "insert", index: 0, elemId: `2@${actor_id}` },
+                    ],
+                    props: {
+                      "KEYTOINT:0": {
+                        [`2@${actor_id}`]: { value: "chaffinch" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: { birds: ["chaffinch"] },
+        },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { actor_id: 2 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                birds: {
+                  [`1@${actor_id}`]: {
+                    objectId: `1@${actor_id}`,
+                    type: "list",
+                    edits: [],
+                    props: {
+                      "KEYTOINT:0": {
+                        [`3@${actor_id}`]: { value: "greenfinch" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: { birds: ["greenfinch"] },
+        },
+      ],
+    },
+    {
+      // Copied this test from the Rust version
+      name: "should apply updates inside list element conflicts",
+      steps: [
+        { type: "create_doc" },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { [actor]: 1, [other_actor_1]: 1, [other_actor_2]: 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                birds: {
+                  [`1@${actor}`]: {
+                    objectId: `1@${actor}`,
+                    type: "list",
+                    edits: [
+                      {
+                        action: "insert",
+                        index: 0,
+                        elemId: `2@${other_actor_1}`,
+                      },
+                    ],
+                    props: {
+                      "KEYTOINT:0": {
+                        [`2@${other_actor_1}`]: {
+                          objectId: `2@${other_actor_1}`,
+                          type: "map",
+                          props: {
+                            species: {
+                              [`3@${other_actor_1}`]: { value: "woodpecker" },
+                            },
+                            numSeen: { [`4@${other_actor_1}`]: { value: 1 } },
+                          },
+                        },
+                        [`2@${other_actor_2}`]: {
+                          objectId: `2@${other_actor_2}`,
+                          type: "map",
+                          props: {
+                            species: {
+                              [`3@${other_actor_2}`]: { value: "lapwing" },
+                            },
+                            numSeen: { [`4@${other_actor_2}`]: { value: 2 } },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: { birds: [{ species: "lapwing", numSeen: 2 }] },
+        },
+        {
+          type: "assert_conflicts_equal",
+          path: ["birds", 0],
+          to: {
+            [`2@${other_actor_1}`]: {
+              species: "woodpecker", numSeen: 1
+            },
+            [`2@${other_actor_2}`]: {
+              species: "lapwing", numSeen: 2
+            }
+          }
+        },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { [other_actor_1]: 2, [other_actor_2]: 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                birds: {
+                  [`1@${actor}`]: {
+                    objectId: `1@${actor}`,
+                    type: "list",
+                    edits: [],
+                    props: {
+                      "KEYTOINT:0": {
+                        [`2@${other_actor_1}`]: {
+                          objectId: `2@${other_actor_1}`,
+                          type: "map",
+                          props: {
+                            numSeen: { [`5@${other_actor_1}`]: { value: 2 } },
+                          },
+                        },
+                        [`2@${other_actor_2}`]: {
+                          objectId: `2@${other_actor_2}`,
+                          type: "map",
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: {
+            birds: [{ species: "lapwing", numSeen: 2 }],
+          },
         },
       ],
     },
