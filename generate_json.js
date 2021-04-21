@@ -830,7 +830,7 @@ const tests = {
       ],
     },
     {
-      // Copied this test from the Rust version
+      // Copied this test from the Rust version (the JS version doesn't use proper op ids)
       name: "should apply updates inside list element conflicts",
       steps: [
         { type: "create_doc" },
@@ -892,12 +892,14 @@ const tests = {
           path: ["birds", 0],
           to: {
             [`2@${other_actor_1}`]: {
-              species: "woodpecker", numSeen: 1
+              species: "woodpecker",
+              numSeen: 1,
             },
             [`2@${other_actor_2}`]: {
-              species: "lapwing", numSeen: 2
-            }
-          }
+              species: "lapwing",
+              numSeen: 2,
+            },
+          },
         },
         {
           type: "apply_patch",
@@ -939,6 +941,60 @@ const tests = {
             birds: [{ species: "lapwing", numSeen: 2 }],
           },
         },
+      ],
+    },
+    {
+      name: "should delete list elements",
+      steps: [
+        { type: "create_doc" },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { [actor]: 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                birds: {
+                  [`1@${actor}`]: {
+                    objectId: `1@${actor}`,
+                    type: "list",
+                    edits: [
+                      { action: "insert", index: 0, elemId: `2@${actor}` },
+                      { action: "insert", index: 1, elemId: `3@${actor}` },
+                    ],
+                    props: {
+                      'KEYTOINT:0': { [`2@${actor}`]: { value: "chaffinch" } },
+                      'KEYTOINT:1': { [`3@${actor}`]: { value: "goldfinch" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        { type: "assert_doc_equal", to: { birds: ["chaffinch", "goldfinch"] } },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { [actor]: 2 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                birds: {
+                  [`1@${actor}`]: {
+                    objectId: `1@${actor}`,
+                    type: "list",
+                    props: {},
+                    edits: [{ action: "remove", index: 0 }],
+                  },
+                },
+              },
+            },
+          },
+        },
+        { type: "assert_doc_equal", to: { birds: ["goldfinch"] } },
       ],
     },
   ],
