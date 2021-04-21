@@ -964,8 +964,8 @@ const tests = {
                       { action: "insert", index: 1, elemId: `3@${actor}` },
                     ],
                     props: {
-                      'KEYTOINT:0': { [`2@${actor}`]: { value: "chaffinch" } },
-                      'KEYTOINT:1': { [`3@${actor}`]: { value: "goldfinch" } },
+                      "KEYTOINT:0": { [`2@${actor}`]: { value: "chaffinch" } },
+                      "KEYTOINT:1": { [`3@${actor}`]: { value: "goldfinch" } },
                     },
                   },
                 },
@@ -995,6 +995,109 @@ const tests = {
           },
         },
         { type: "assert_doc_equal", to: { birds: ["goldfinch"] } },
+      ],
+    },
+    {
+      name: "should apply updates at different levels of the object tree",
+      steps: [
+        { type: "create_doc" },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { [actor]: 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                counts: {
+                  [`1@${actor}`]: {
+                    objectId: `1@${actor}`,
+                    type: "map",
+                    props: {
+                      magpies: { [`2@${actor}`]: { value: 2 } },
+                    },
+                  },
+                },
+                details: {
+                  [`3@${actor}`]: {
+                    objectId: `3@${actor}`,
+                    type: "list",
+                    edits: [
+                      { action: "insert", index: 0, elemId: `4@${actor}` },
+                    ],
+                    props: {
+                      "KEYTOINT:0": {
+                        [`4@${actor}`]: {
+                          objectId: `4@${actor}`,
+                          type: "map",
+                          props: {
+                            species: { [`5@${actor}`]: { value: "magpie" } },
+                            family: { [`6@${actor}`]: { value: "corvidae" } },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: {
+            counts: { magpies: 2 },
+            details: [{ species: "magpie", family: "corvidae" }],
+          },
+        },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { [actor]: 2 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                counts: {
+                  [`1@${actor}`]: {
+                    objectId: `1@${actor}`,
+                    type: "map",
+                    props: {
+                      magpies: { [`7@${actor}`]: { value: 3 } },
+                    },
+                  },
+                },
+                details: {
+                  [`3@${actor}`]: {
+                    objectId: `3@${actor}`,
+                    type: "list",
+                    edits: [],
+                    props: {
+                      "KEYTOINT:0": {
+                        [`4@${actor}`]: {
+                          objectId: `4@${actor}`,
+                          type: "map",
+                          props: {
+                            species: {
+                              [`8@${actor}`]: { value: "Eurasian magpie" },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: {
+            counts: { magpies: 3 },
+            details: [{ species: "Eurasian magpie", family: "corvidae" }],
+          },
+        },
       ],
     },
   ],
