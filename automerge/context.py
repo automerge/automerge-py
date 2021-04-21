@@ -195,11 +195,14 @@ class Context:
             )
             elem_id = "_head"
             for idx, item in enumerate(val):
-                (value_patch, create_child_obj_op_id) = self.set_value(
+                # `list_element_op_id` is the elemId of the element we inserted
+                # in `set_value`, `elem_id` is the id of the previous list element id
+                # since insert ops must provide the elemId of the element after which they inserting
+                (value_patch, list_element_op_id) = self.set_value(
                     create_list_op_id, idx, item, insert=True, elemId=elem_id
                 )
-                props[idx] = {create_child_obj_op_id: value_patch}
-                elem_id = create_child_obj_op_id
+                props[idx] = {list_element_op_id: value_patch}
+                elem_id = list_element_op_id
                 edits.append({"action": "insert", "index": idx, "elemId": elem_id})
             return (
                 {

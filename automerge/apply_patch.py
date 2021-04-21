@@ -46,16 +46,21 @@ def get_value(conflict, patch):
 def apply_properties(obj, props):
     our_recent_ops = obj.recent_ops
     for key, patch_recent_ops in props.items():
+        # Sort the lamport timestamps in increasing order & reverse the result
+        # so the highest timestamp is first
         values, patch_op_ids = {}, list(patch_recent_ops.keys())
         patch_op_ids.sort(key=cmp_to_key(lamport_compare))
         patch_op_ids.reverse()
 
         for patch_op_id in patch_op_ids:
             subpatch = patch_recent_ops[patch_op_id]
-            # breakpoint()
             have_key_entry = (
                 key in our_recent_ops
                 if isinstance(our_recent_ops, dict)
+                # `key` is an idx & `our_recent_ops` is an array
+                #  we need to check that `our_recent_ops[key]` is not None
+                #  (to prevent exception on next line) b/c in `update_list_obj`
+                #  we fill `our_recent_ops` with None values
                 else (key < len(our_recent_ops) and our_recent_ops[key])
             )
             if have_key_entry and (patch_op_id in our_recent_ops[key]):
@@ -80,6 +85,8 @@ def apply_properties(obj, props):
             del obj[key]
             del our_recent_ops[key]
         else:
+            # B/c the highest lamport timestamp is 1st
+            # the default value will have been created at the highest lamport timestamp
             obj[key] = values[patch_op_ids[0]]
             our_recent_ops[key] = values
 
@@ -108,7 +115,6 @@ def apply_patch(obj, patch):
         apply_properties(obj, patch["props"])
         return obj
     elif patch["type"] == "list":
-        # breakpoint()
         update_list_obj(obj, patch["props"], patch["edits"])
         return obj
     else:

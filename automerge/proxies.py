@@ -121,6 +121,8 @@ class ListProxy(MutableSequence):
             idx = slen
         elif idx < 0:
             idx = 0
+        # in the change format, when inserting, we give the `elemId` of the element *after*
+        # which we are inserting. (If we are inserting at the first element, we use "_head")
         elem_id = "_head" if idx == 0 else self.assoc_list.elem_ids[idx - 1]
         preds = self.assoc_list.get_pred(idx)
 
@@ -137,9 +139,6 @@ class ListProxy(MutableSequence):
             subpatch["edits"] = [{"action": "insert", "index": idx, "elemId": op_id}]
 
         self.ctx.apply_at_path(self.path, cb)
-
-
-list_obj = ListProxy(None, None, None)
 
 
 def is_primitive(val):
