@@ -1,5 +1,6 @@
-from collections.abc import MutableMapping
-from .datatypes import Map
+import math
+from collections.abc import MutableMapping, MutableSequence
+from .datatypes import Map, List
 
 
 class MapProxy(MutableMapping):
@@ -56,6 +57,84 @@ class MapProxy(MutableMapping):
         return self.assoc_obj.__len__()
 
 
+class ListProxy(MutableSequence):
+    def __init__(self, ctx, assoc_list, path):
+        self.ctx = ctx
+        self.assoc_list = assoc_list
+        self.path = path
+
+    def __getitem__(self, idx):
+        val = self.assoc_list[idx]
+        return get_maybe_proxy(self.ctx, val, self.path)
+
+    def __delitem__(self, idx):
+        if idx < 0 or idx >= len(self.assoc_list):
+            raise IndexError(idx)
+        elem_id = self.assoc_list.elem_ids[idx]
+        preds = self.assoc_list.get_pred(elem_id)
+
+        self.ctx.add_op(
+            action="del",
+            obj=self.assoc_list.object_id,
+            elemId=elem_id,
+            insert=False,
+            pred=preds,
+        )
+
+        def cb(subpatch):
+            subpatch["props"][elem_id] = {}
+
+        self.ctx.apply_at_path(self.path, cb)
+
+    def __len__(self):
+        return self.assoc_list.__len__()
+
+    def __setitem__(self, idx, val):
+        if idx < 0 or idx >= len(self.assoc_list):
+            raise IndexError(idx)
+
+        # TODO: check conflicts
+        if self.assoc_list[idx] != val:
+
+            def cb(subpatch):
+                elem_id = self.assoc_list.elem_ids[idx]
+                preds = self.assoc_list.get_pred(elem_id)
+                (value_patch, op_id) = self.ctx.set
+
+            pass
+
+    # insert an element before the given idx
+    # if idx >= len(self), insert at the end
+    # if idx <= 0, insert at the start
+    def insert(self, idx, val):
+        slen = len(self)
+        if idx > slen:
+            idx = slen
+        elif idx < 0:
+            idx = 0
+        elem_id = "_head" if idx == 0 else self.assoc_list.elem_ids[idx - 1]
+        preds = self.assoc_list.get_pred(elem_id)
+
+        def cb(subpatch):
+            (value_patch, op_id) = self.ctx.set_value(
+                self.assoc_list.object_id,
+                idx,
+                val,
+                elemId=elem_id,
+                insert=True,
+                pred=preds,
+            )
+            subpatch["props"][idx] = {op_id: value_patch}
+            subpatch["edits"] = [{"action": "insert", "index": idx, "elemId": op_id}]
+            # "chaffinch"print(subpatch['props'], subpatch['edits'])
+            # print("====")
+
+        self.ctx.apply_at_path(self.path, cb)
+
+
+list_obj = ListProxy(None, None, None)
+
+
 def is_primitive(val):
     return (
         val is None
@@ -69,6 +148,8 @@ def get_maybe_proxy(context, key, val, old_path):
     new_path = old_path + [(key, val.object_id)]
     if isinstance(val, Map):
         return MapProxy(context, val, new_path)
+    elif isinstance(val, List):
+        return ListProxy(context, val, new_path)
     else:
         if not is_primitive(val):
             raise ValueError(

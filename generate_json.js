@@ -220,10 +220,7 @@ const tests = {
           type: "change_doc",
           trace: [{ type: "delete", path: ["magpies"] }],
         },
-        {
-          type: "assert_doc_equal",
-          to: { sparrows: 15 },
-        },
+        { type: "assert_doc_equal", to: { sparrows: 15 } },
         {
           type: "assert_change_equal",
           to: {
@@ -240,6 +237,103 @@ const tests = {
                 key: "magpies",
                 insert: false,
                 pred: ["1@1111111111111111"],
+              },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      name: "should create lists",
+      steps: [
+        { type: "create_doc", params: { actor_id } },
+        {
+          type: "change_doc",
+          trace: [{ type: "set", path: ["birds"], value: ["chaffinch"] }],
+        },
+        {
+          type: "assert_doc_equal",
+          to: { birds: ["chaffinch"] },
+        },
+        {
+          type: "assert_change_equal",
+          to: {
+            actor,
+            seq: 1,
+            time: 0,
+            message: "",
+            startOp: 1,
+            deps: [],
+            ops: [
+              {
+                obj: "_root",
+                action: "makeList",
+                key: "birds",
+                insert: false,
+                pred: [],
+              },
+              {
+                obj: `1@${actor}`,
+                action: "set",
+                elemId: "_head",
+                insert: true,
+                value: "chaffinch",
+                pred: [],
+              },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      // This test did not exist in the JS test suite, but I found it necessary
+      name: "should insert into lists",
+      steps: [
+        { type: "create_doc", params: { actor_id } },
+        {
+          type: "change_doc",
+          trace: [
+            { type: "set", path: ["birds"], value: [] },
+            { type: "insert", path: ["birds", 0], value: "magpie" },
+            { type: "insert", path: ["birds", 1], value: "wren" },
+          ],
+        },
+        {
+          type: "assert_doc_equal",
+          to: { birds: ["magpie", "wren"] },
+        },
+        {
+          type: "assert_change_equal",
+          to: {
+            actor,
+            seq: 1,
+            startOp: 1,
+            deps: [],
+            time: 0,
+            message: "",
+            ops: [
+              {
+                action: "makeList",
+                obj: "_root",
+                key: "birds",
+                insert: false,
+                pred: [],
+              },
+              {
+                action: "set",
+                obj: `1@${actor}`,
+                elemId: "_head",
+                insert: true,
+                pred: [],
+                value: "magpie",
+              },
+              {
+                action: "set",
+                obj: `1@${actor}`,
+                elemId: `2@${actor}`,
+                insert: true,
+                pred: [],
+                value: "wren",
               },
             ],
           },
@@ -430,7 +524,9 @@ const tests = {
                     type: "map",
                     props: {
                       blackbirds: {
-                        "2@02ef21f3c9eb4087880ebedd7c4bbe43": { value: 1 },
+                        "2@02ef21f3c9eb4087880ebedd7c4bbe43": {
+                          value: 1,
+                        },
                       },
                     },
                   },
@@ -439,7 +535,9 @@ const tests = {
                     type: "map",
                     props: {
                       wrens: {
-                        "2@2a1d376b24f744008d4af58252d644dd": { value: 3 },
+                        "2@2a1d376b24f744008d4af58252d644dd": {
+                          value: 3,
+                        },
                       },
                     },
                   },
@@ -454,6 +552,7 @@ const tests = {
         },
         {
           type: "assert_conflicts_equal",
+          path: ["favoriteBirds"],
           to: {
             "1@02ef21f3c9eb4087880ebedd7c4bbe43": { blackbirds: 1 },
             "1@2a1d376b24f744008d4af58252d644dd": { wrens: 3 },
@@ -476,12 +575,14 @@ const tests = {
                     type: "map",
                     props: {
                       blackbirds: {
-                        "3@02ef21f3c9eb4087880ebedd7c4bbe43": { value: 2 },
+                        "3@02ef21f3c9eb4087880ebedd7c4bbe43": {
+                          value: 2,
+                        },
                       },
                     },
                   },
                   "1@2a1d376b24f744008d4af58252d644dd": {
-                    objectId: "1@02ef21f3c9eb4087880ebedd7c4bbe43",
+                    objectId: "1@2a1d376b24f744008d4af58252d644dd",
                     type: "map",
                   },
                 },
@@ -497,6 +598,7 @@ const tests = {
         },
         {
           type: "assert_conflicts_equal",
+          path: ["favoriteBirds"],
           to: {
             "1@02ef21f3c9eb4087880ebedd7c4bbe43": { blackbirds: 2 },
             "1@2a1d376b24f744008d4af58252d644dd": { wrens: 3 },

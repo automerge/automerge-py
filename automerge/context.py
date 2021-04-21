@@ -56,7 +56,7 @@
 from typing import Any, TypedDict
 
 from .apply_patch import apply_patch
-from .datatypes import Map
+from .datatypes import Map, List
 
 # TODO: For now, only works on primitives
 def get_value_description(val):
@@ -80,7 +80,7 @@ class Context:
         do this wrapping/unwrapping since `recent_ops` is not visible to the user anyways, so
         we could just store straight-up patch data.
         """
-        if isinstance(val, Map):
+        if isinstance(val, Map) or isinstance(val, List):
             return {"objectId": val.object_id, "type": val.type}
         else:
             return {"value": val}
@@ -144,6 +144,9 @@ class Context:
         #       (also creating the dict @ patch["diffs"]["foo"])
         subpatch = self.get_subpatch(patch, path)
         init_subpatch(subpatch)
+        print("=======")
+        print(patch)
+        print("------")
         apply_patch(self.root_obj, patch["diffs"])
 
     def set_value(self, parent_obj_id, key, val, **op_params):
@@ -161,15 +164,14 @@ class Context:
         - Adds the necessary ops to the change context to generate the final change that is sent to the backend
 
         `parent_obj_id`: The object id of the object that will contain this key/val pair
-        `key`: The key to set at the path
+        `key`: The key to set at the path. In the case of a list, this will be a numerical index.
         `val`: The value to set at the key
         `op_params`: Data that will be in the final op
         """
 
-        if key == "":
-            raise ValueError("The key of a map entry must not be an empty string")
-
         if isinstance(val, dict):
+            if key == "":
+                raise ValueError("The key of a map entry must not be an empty string")
             if hasattr(val, "object_id"):
                 raise ValueError(
                     f"Cannot create a reference to existing document object: {val}. Found object_id: {val.object_id}"
@@ -188,6 +190,29 @@ class Context:
                 {"objectId": create_obj_op_id, "type": "map", "props": props},
                 create_obj_op_id,
             )
+        elif isinstance(val, list):
+            edits = []
+            props = {}
+            create_list_op_id = self.add_op(
+                action="makeList", obj=parent_obj_id, key=key, **op_params
+            )
+            elem_id = "_head"
+            for idx, item in enumerate(val):
+                (value_patch, create_child_obj_op_id) = self.set_value(
+                    create_list_op_id, idx, item, insert=True, elemId=elem_id
+                )
+                props[idx] = {create_child_obj_op_id: value_patch}
+                elem_id = create_child_obj_op_id
+                edits.append({"action": "insert", "index": idx, "elemId": elem_id})
+            return (
+                {
+                    "objectId": create_list_op_id,
+                    "type": "list",
+                    "edits": edits,
+                    "props": props,
+                },
+                create_list_op_id,
+            )
         else:
             # it's a primitive
             description = get_value_description(val)
@@ -201,9 +226,8 @@ class Context:
             op["pred"] = []
         if "insert" not in op:
             op["insert"] = False
-        # TODO: Do some verification of the op here
-        # TODO: Do some data normalization, there will be situations where key is None
-        # so we should be looking @ elemid etc..
+        if "elemId" in op:
+            del op["key"]
 
         self.ops.append(op)
         return f"{self.max_op + len(self.ops)}@{self.actor_id}"

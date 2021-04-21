@@ -1,7 +1,7 @@
 from functools import cmp_to_key
 from typing import NamedTuple
 import re
-from .datatypes import Map
+from .datatypes import Map, List
 
 OpId = NamedTuple("OpId", [("counter", int), ("actorId", str)])
 OP_ID_RE = re.compile("^(\d+)@(.*)$")
@@ -59,7 +59,12 @@ def apply_properties(obj, props):
             else:
                 v = None
                 if "objectId" in subpatch:
-                    v = get_value(Map([], subpatch["objectId"]), subpatch)
+                    new_val = (
+                        Map([], subpatch["objectId"])
+                        if subpatch["type"] == "map"
+                        else List([], subpatch["objectId"])
+                    )
+                    v = get_value(new_val, subpatch)
                 else:
                     v = get_value(None, subpatch)
                 values[patch_op_id] = v
@@ -73,6 +78,21 @@ def apply_properties(obj, props):
             our_recent_ops[key] = values
 
 
+def update_list_obj(listobj, props, edits):
+    our_recent_ops, elem_ids = listobj.recent_ops, listobj.elem_ids
+    for edit in edits:
+        idx = edit["index"]
+        if edit["action"] == "insert":
+            elem_ids.insert(idx, edit["elemId"])
+            listobj.insert(idx, None)
+            our_recent_ops.insert(idx, None)
+        elif edit["action"] == "remove":
+            del elem_ids[idx]
+            del listobj[idx]
+            del our_recent_ops[idx]
+    apply_properties(listobj, props)
+
+
 def apply_patch(obj, patch):
     if obj is not None and "props" not in patch and "edits" not in patch:
         # TODO: null check?
@@ -80,6 +100,9 @@ def apply_patch(obj, patch):
 
     if patch["type"] == "map":
         apply_properties(obj, patch["props"])
+        return obj
+    elif patch["type"] == "list":
+        update_list_obj(obj, patch["props"], patch["edits"])
         return obj
     else:
         raise Exception(f"Unknown object type in patch: {patch['type']}")

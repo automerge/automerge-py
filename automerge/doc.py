@@ -33,6 +33,12 @@ class Doc(MutableMapping):
     def apply_patch(self, patch):
         self.root_obj = apply_patch(self.root_obj, patch["diffs"])
 
+    def get_recent_ops(self, path):
+        temp = self.root_obj
+        for segment in path[:-1]:
+            temp = temp[segment]
+        return temp.recent_ops[path[-1]]
+
     def __getitem__(self, key):
         return self.root_obj[key]
 

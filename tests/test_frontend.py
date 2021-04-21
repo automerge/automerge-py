@@ -5,6 +5,13 @@ from uuid import uuid4
 import json
 
 
+def goto_path(obj, path):
+    temp = obj
+    for segment in path[:-1]:
+        temp = temp[segment]
+    return temp
+
+
 def run_test(self, steps, name):
     doc_ = change = None
 
@@ -28,16 +35,22 @@ def run_test(self, steps, name):
                     edit_typ = edit["type"]
                     if edit_typ == "set":
                         path, value = edit["path"], edit["value"]
-                        temp = d
-                        for segment in path[:-1]:
-                            temp = temp[segment]
-                        temp[path[-1]] = value
+                        goto_path(d, path)[path[-1]] = value
+                        # temp = d
+                        # for segment in path[:-1]:
+                        #    temp = temp[segment]
+                        # temp[path[-1]] = value
                     elif edit_typ == "delete":
                         path = edit["path"]
-                        temp = d
-                        for segment in path[:-1]:
-                            temp = temp[segment]
-                        del temp[path[-1]]
+                        del goto_path(d, path)[path[-1]]
+                        # temp = d
+                        # for segment in path[:-1]:
+                        #    temp = temp[segment]
+                        # del temp[path[-1]]
+                    elif edit_typ == "insert":
+                        path = edit["path"]
+                        array = goto_path(d, path)
+                        array.insert(path[-1], edit["value"])
                     else:
                         raise Exception(f"Unexpected edit type: {edit_typ}")
             change = doc_.changes.pop()
@@ -48,13 +61,15 @@ def run_test(self, steps, name):
         elif typ == "apply_patch":
             doc_.apply_patch(step["patch"])
         elif typ == "assert_conflicts_equal":
-            print("asserting!")
+            to, path = step["to"], step["path"]
+            self.assertEqual(doc_.get_recent_ops(path), to)
         else:
             raise Exception(f"Unknown step type: {typ}")
 
 
 def create_test_wrapper(steps, name):
     def wrapper(self):
+        self.maxDiff = None
         run_test(self, steps, name)
 
     return wrapper
@@ -80,3 +95,7 @@ with open("frontend_tests.json", "r") as f:
         globs[section_name] = test_klass
         # Prevent the tests in the last test group from running twice.
         test_klass = None
+
+
+if __name__ == "__main__":
+    unittest.main()
