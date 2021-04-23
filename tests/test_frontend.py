@@ -44,9 +44,9 @@ def run_test(self, steps, name):
                 kwargs["actor_id"] = params["actor_id"]
             doc_ = doc.Doc(**kwargs)
         elif typ == "assert_doc_equal":
-            # Could use `doc_` instead of `doc_.root_obj`
+            # Could use `doc_` instead `get_active_root_obj`
             # but this would make error messages less nice
-            self.assertEqual(doc_.root_obj, step["to"])
+            self.assertEqual(doc_.get_active_root_obj(), step["to"])
         elif typ == "change_doc":
             with doc_ as d:
                 for edit in step["trace"]:
@@ -63,7 +63,7 @@ def run_test(self, steps, name):
                         array.insert(path[-1], edit["value"])
                     else:
                         raise Exception(f"Unexpected edit type: {edit_typ}")
-            change = doc_.changes.pop()
+            change = doc_.local_changes.pop()
         elif typ == "assert_change_equal":
             # The time is the one value that is non-deterministic
             change["time"] = 0
@@ -88,7 +88,7 @@ def create_test_wrapper(steps, name):
 
 
 # SECTION_MATCH = "apply"
-# TEST_MATCH = "inside_list_element_conflicts"
+# TEST_MATCH = "should_delete_list"
 SECTION_MATCH = None
 TEST_MATCH = None
 

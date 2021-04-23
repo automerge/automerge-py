@@ -58,10 +58,6 @@ from typing import Any, TypedDict
 from .apply_patch import apply_patch
 from .datatypes import Map, List
 
-# TODO: For now, only works on primitives
-def get_value_description(val):
-    return {"value": val}
-
 
 class Context:
     def __init__(self, max_op: int, actor_id: str, root_obj: Map):
@@ -140,8 +136,8 @@ class Context:
 
         # If change is `root.foo.bar = "baz"` then
         # - `path` = [(foo, "<foo object id>")]
-        # - `get_subpatch` will do patch["diffs"]["foo"]["props"] = {}
-        #       (also creating the dict @ patch["diffs"]["foo"])
+        # - `get_subpatch` will do patch["diffs"]["props"]["foo"][<op_id>]["props"] = {}
+        # (creating the entries along the way)
         subpatch = self.get_subpatch(patch, path)
         init_subpatch(subpatch)
         apply_patch(self.root_obj, patch["diffs"])
@@ -157,7 +153,7 @@ class Context:
           # nothing has been sent to the backend but we can still access `foo.a.b`
           foo.a.b = 43
           ```
-        - Returns the op id of the op that created `val`
+        - Also returns the op id of the op that created `val`
         - Adds the necessary ops to the change context to generate the final change that is sent to the backend
 
         `parent_obj_id`: The object id of the object that will contain this key/val pair
@@ -183,6 +179,7 @@ class Context:
                     create_obj_op_id, child_key, val[child_key]
                 )
                 props[child_key] = {create_child_obj_op_id: value_patch}
+            # the patch we will immediately apply
             return (
                 {"objectId": create_obj_op_id, "type": "map", "props": props},
                 create_obj_op_id,
@@ -203,6 +200,7 @@ class Context:
                 )
                 props[idx] = {list_element_op_id: value_patch}
                 elem_id = list_element_op_id
+                # patches use the actual elemId of the list element
                 edits.append({"action": "insert", "index": idx, "elemId": elem_id})
             return (
                 {
@@ -215,7 +213,7 @@ class Context:
             )
         else:
             # it's a primitive
-            description = get_value_description(val)
+            description = self.get_value_description(val)
             set_value_op_id = self.add_op(
                 action="set", obj=parent_obj_id, key=key, **description, **op_params
             )

@@ -64,6 +64,7 @@ def apply_properties(obj, props):
                 else (key < len(our_recent_ops) and our_recent_ops[key])
             )
             if have_key_entry and (patch_op_id in our_recent_ops[key]):
+                # TODO: Explain when this case happens
                 values[patch_op_id] = get_value(
                     our_recent_ops[key][patch_op_id], subpatch
                 )
