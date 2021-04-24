@@ -12,6 +12,7 @@ const fs = require("fs");
 // when deserializing a patch from JSON for "apply_patch", iterate through the keys, and if any
 // of them have the form "KEYTOINT:X", replace the key with the integer version of "X"
 // TODO: Should we just use YAML for the generated output instead?
+// Nevermind, looks like YAML also doesn't support int keys
 
 const actor_id = "1111111111111111";
 const actor = actor_id;
@@ -431,6 +432,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 1,
             clock: { "02ef21f3c9eb4087880ebedd7c4bbe43": 1 },
             diffs: {
               objectId: "_root",
@@ -458,6 +460,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 2,
             clock: {
               "02ef21f3c9eb4087880ebedd7c4bbe43": 1,
               "2a1d376b24f744008d4af58252d644dd": 2,
@@ -497,6 +500,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 3,
             clock: { "2a1d376b24f744008d4af58252d644dd": 1 },
             diffs: {
               objectId: "_root",
@@ -530,6 +534,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 2,
             clock: { "2a1d376b24f744008d4af58252d644dd": 1 },
             diffs: {
               objectId: "_root",
@@ -558,6 +563,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 3,
             clock: { "2a1d376b24f744008d4af58252d644dd": 2 },
             diffs: {
               objectId: "_root",
@@ -591,6 +597,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 2,
             clock: {
               "02ef21f3c9eb4087880ebedd7c4bbe43": 1,
               "2a1d376b24f744008d4af58252d644dd": 1,
@@ -642,6 +649,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 1,
             clock: {
               "02ef21f3c9eb4087880ebedd7c4bbe43": 2,
               "2a1d376b24f744008d4af58252d644dd": 1,
@@ -694,6 +702,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 2,
             clock: { "02ef21f3c9eb4087880ebedd7c4bbe43": 1 },
             diffs: {
               objectId: "_root",
@@ -714,6 +723,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 3,
             clock: { "02ef21f3c9eb4087880ebedd7c4bbe43": 2 },
             diffs: {
               objectId: "_root",
@@ -737,6 +747,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 2,
             clock: { [actor_id]: 1 },
             diffs: {
               objectId: "_root",
@@ -772,6 +783,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 1,
             clock: { actor_id: 1 },
             diffs: {
               objectId: "_root",
@@ -802,6 +814,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 3,
             clock: { actor_id: 2 },
             diffs: {
               objectId: "_root",
@@ -837,6 +850,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 2,
             clock: { [actor]: 1, [other_actor_1]: 1, [other_actor_2]: 1 },
             diffs: {
               objectId: "_root",
@@ -904,6 +918,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 5,
             clock: { [other_actor_1]: 2, [other_actor_2]: 1 },
             diffs: {
               objectId: "_root",
@@ -950,6 +965,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 3,
             clock: { [actor]: 1 },
             diffs: {
               objectId: "_root",
@@ -977,6 +993,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 4,
             clock: { [actor]: 2 },
             diffs: {
               objectId: "_root",
@@ -1004,6 +1021,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 6,
             clock: { [actor]: 1 },
             diffs: {
               objectId: "_root",
@@ -1053,6 +1071,7 @@ const tests = {
         {
           type: "apply_patch",
           patch: {
+            maxOp: 7,
             clock: { [actor]: 2 },
             diffs: {
               objectId: "_root",
@@ -1096,6 +1115,52 @@ const tests = {
           to: {
             counts: { magpies: 3 },
             details: [{ species: "Eurasian magpie", family: "corvidae" }],
+          },
+        },
+      ],
+    },
+  ],
+  "backend concurrency": [
+    {
+      name: "should use version and sequence number from the backend",
+      steps: [
+        { type: "create_doc", params: { actor_id } },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { [actor_id]: 4, [other_actor_1]: 11, [other_actor_2]: 41 },
+            maxOp: 4,
+            deps: [],
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: { blackbirds: { [actor_id]: { value: 24 } } },
+            },
+          },
+        },
+        {
+          type: "change_doc",
+          trace: [{ type: "set", path: ["partridges"], value: 1 }],
+        },
+        {
+          type: "assert_change_equal",
+          to: {
+            actor,
+            seq: 5,
+            deps: [],
+            startOp: 5,
+            time: 0,
+            message: "",
+            ops: [
+              {
+                obj: "_root",
+                action: "set",
+                key: "partridges",
+                insert: false,
+                value: 1,
+                pred: [],
+              },
+            ],
           },
         },
       ],

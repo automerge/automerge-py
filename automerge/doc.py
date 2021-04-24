@@ -73,6 +73,18 @@ class Doc(MutableMapping):
                 # we've "caught up" (the backed has processed all active local changes and sent back patches for each of them)
                 self.optimistic_root_obj = None
 
+        # We're caught up
+        if self.optimistic_root_obj == None:
+            # TODO: Explain the intuition for why we only
+            # use the patch's `maxOp` if we're caught up
+            self.max_op = patch["maxOp"]
+
+        # TODO: Why do we look at clock seq instead of using patch["seq"]?
+        if self.actor_id in patch["clock"]:
+            clock_seq = patch["clock"][self.actor_id]
+            if clock_seq > self.seq:
+                self.seq = clock_seq
+
         # we always apply patches to the "true" state.
         # This means remote changes aren't reflected until the optimistic fork is discarded
         self.root_obj = apply_patch(self.root_obj, patch["diffs"])
@@ -122,7 +134,7 @@ class Doc(MutableMapping):
             # (`in_flight_local_changes` is empty)
 
             # we can't apply patches from the backend to the optimistic fork b/c the backend
-            # buffers changes & sends them in an appropriate ordering, but the fork breaks this ordering
+            # buffers changes & sends them in an appropriate ordering (the frontend doesn't need to worry about patch order), but the fork breaks this ordering
             # (in order to be optimistic)
             if not self.optimistic_root_obj:
                 # create the optimistic state, if it doesn't already exist
