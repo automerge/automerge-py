@@ -61,7 +61,7 @@ class Doc(MutableMapping):
                     d[k] = v
 
     def apply_patch(self, patch):
-        if "actorId" in patch and patch["actorId"] == self.actor_id:
+        if "actor" in patch and patch["actor"] == self.actor_id:
             # it's a patch generated from a local change we made
             expected_seq = self.in_flight_local_changes[0]
             if patch["seq"] != expected_seq:

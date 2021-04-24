@@ -1120,6 +1120,8 @@ const tests = {
       ],
     },
   ],
+  // SKIP: dont_allow_out_of_order_request_patches (requires asserting a method throws or returns an error)
+  // better to just do this test natively since it's the only assertion of this type
   "backend concurrency": [
     {
       name: "should use version and sequence number from the backend",
@@ -1162,6 +1164,303 @@ const tests = {
               },
             ],
           },
+        },
+        {
+          type: "assert_in_flight_equal",
+          to: [{ seq: 5 }],
+        },
+      ],
+    },
+    {
+      name: "should remove pending requests once handled",
+      steps: [
+        { type: "create_doc", params: { actor_id } },
+        {
+          type: "change_doc",
+          trace: [{ type: "set", path: ["blackbirds"], value: 24 }],
+        },
+        {
+          type: "assert_change_equal",
+          to: {
+            actor,
+            seq: 1,
+            deps: [],
+            startOp: 1,
+            time: 0,
+            message: "",
+            ops: [
+              {
+                obj: "_root",
+                action: "set",
+                key: "blackbirds",
+                insert: false,
+                value: 24,
+                pred: [],
+              },
+            ],
+          },
+        },
+        {
+          type: "change_doc",
+          trace: [{ type: "set", path: ["partridges"], value: 1 }],
+        },
+        {
+          type: "assert_change_equal",
+          to: {
+            actor,
+            seq: 2,
+            deps: [],
+            startOp: 2,
+            time: 0,
+            message: "",
+            ops: [
+              {
+                obj: "_root",
+                action: "set",
+                key: "partridges",
+                insert: false,
+                value: 1,
+                pred: [],
+              },
+            ],
+          },
+        },
+        {
+          type: "assert_in_flight_equal",
+          to: [{ seq: 1 }, { seq: 2 }],
+        },
+        {
+          type: "apply_patch",
+          patch: {
+            actor,
+            seq: 1,
+            maxOp: 4,
+            clock: { [actor]: 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: { blackbirds: { [actor]: { value: 24 } } },
+            },
+          },
+        },
+        {
+          type: "assert_in_flight_equal",
+          to: [{ seq: 2 }],
+        },
+        {
+          type: "apply_patch",
+          patch: {
+            actor,
+            seq: 2,
+            maxOp: 5,
+            clock: { [actor]: 2 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: { partridges: { [actor]: { value: 1 } } },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: { blackbirds: 24, partridges: 1 },
+        },
+        {
+          type: "assert_in_flight_equal",
+          to: [],
+        },
+      ],
+    },
+    {
+      name: "should leave the request queue unchanged on remote patches",
+      steps: [
+        { type: "create_doc", params: { actor_id } },
+        {
+          type: "change_doc",
+          trace: [{ type: "set", path: ["blackbirds"], value: 24 }],
+        },
+        {
+          type: "assert_change_equal",
+          to: {
+            actor,
+            seq: 1,
+            deps: [],
+            startOp: 1,
+            time: 0,
+            message: "",
+            ops: [
+              {
+                obj: "_root",
+                action: "set",
+                key: "blackbirds",
+                insert: false,
+                value: 24,
+                pred: [],
+              },
+            ],
+          },
+        },
+        {
+          type: "assert_in_flight_equal",
+          to: [{ seq: 1 }],
+        },
+        {
+          type: "apply_patch",
+          patch: {
+            maxOp: 10,
+            clock: { [other_actor_1]: 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: { pheasants: { [other_actor_1]: { value: 2 } } },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: { blackbirds: 24 },
+        },
+        {
+          type: "assert_in_flight_equal",
+          to: [{ seq: 1 }],
+        },
+        {
+          type: "apply_patch",
+          patch: {
+            actor,
+            seq: 1,
+            maxOp: 11,
+            clock: { [actor]: 1, [other_actor_1]: 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: { blackbirds: { [actor]: { value: 24 } } },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: { blackbirds: 24, pheasants: 2 },
+        },
+        {
+          type: "assert_in_flight_equal",
+          to: [],
+        },
+      ],
+    },
+    {
+      name: "should handle concurrent insertions into lists",
+      steps: [
+        { type: "create_doc", params: { actor_id } },
+        {
+          type: "change_doc",
+          trace: [{ type: "set", path: ["birds"], value: ["goldfinch"] }],
+        },
+        {
+          type: "apply_patch",
+          patch: {
+            actor,
+            seq: 1,
+            maxOp: 1,
+            clock: { [actor]: 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                // TODO: I think these actor ids are wrong (even though
+                // they are copied from the Rust tests)
+                birds: {
+                  [`1@${actor}`]: {
+                    objectId: `1@${actor}`,
+                    type: "list",
+                    edits: [
+                      { action: "insert", index: 0, elemId: `1@${actor}` },
+                    ],
+                    props: {
+                      "KEYTOINT:0": { [`1@${actor}`]: { value: "goldfinch" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        { type: "assert_doc_equal", to: { birds: ["goldfinch"] } },
+        { type: "assert_in_flight_equal", to: [] },
+        {
+          type: "change_doc",
+          trace: [
+            { type: "insert", path: ["birds", 0], value: "chaffinch" },
+            { type: "insert", path: ["birds", 2], value: "greenfinch" },
+          ],
+        },
+        {
+          type: "apply_patch",
+          patch: {
+            clock: { [actor]: 1, [other_actor_1]: 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                birds: {
+                  [`1@${actor}`]: {
+                    objectId: `1@${actor}`,
+                    type: "list",
+                    edits: [
+                      {
+                        action: "insert",
+                        index: 1,
+                        elemId: `1${other_actor_1}`,
+                      },
+                    ],
+                    props: {
+                      "KEYTOINT:1": {
+                        [`1@${other_actor_1}`]: { value: "bullfinch" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "assert_doc_equal",
+          to: { birds: ["chaffinch", "goldfinch", "greenfinch"] },
+        },
+        {
+          type: "apply_patch",
+          patch: {
+            actor,
+            seq: 2,
+            maxOp: 3,
+            clock: { [actor]: 2, [other_actor_1]: 1 },
+            diffs: {
+              objectId: "_root",
+              type: "map",
+              props: {
+                birds: {
+                  [`1@${actor}`]: {
+                    objectId: `1@${actor}`,
+                    type: "list",
+                    edits: [
+                      { action: "insert", index: 0, elemId: `1@${actor}` },
+                      { action: "insert", index: 2, elemId: `2@${actor}` },
+                    ],
+                    props: {
+                      "KEYTOINT:0": { [`2@${actor}`]: { value: "chaffinch" } },
+                      "KEYTOINT:2": { [`3@${actor}`]: { value: "greenfinch" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        { type: "assert_in_flight_equal", to: [] },
+        {
+          type: "assert_doc_equal",
+          to: { birds: ["chaffinch", "goldfinch", "greenfinch", "bullfinch"] },
         },
       ],
     },

@@ -33,50 +33,58 @@ def destringify_keys(d):
 def run_test(self, steps, name):
     doc_ = change = None
 
-    for step in steps:
-        typ = step["type"]
-        if typ == "create_doc":
-            params = step["params"] if "params" in step else {}
-            kwargs = {}
-            if "data" in params:
-                kwargs["initial_data"] = params["data"]
-            if "actor_id" in params:
-                kwargs["actor_id"] = params["actor_id"]
-            doc_ = doc.Doc(**kwargs)
-        elif typ == "assert_doc_equal":
-            # Could use `doc_` instead `get_active_root_obj`
-            # but this would make error messages less nice
-            self.assertEqual(doc_.get_active_root_obj(), step["to"])
-        elif typ == "change_doc":
-            with doc_ as d:
-                for edit in step["trace"]:
-                    edit_typ = edit["type"]
-                    if edit_typ == "set":
-                        path, value = edit["path"], edit["value"]
-                        goto_path(d, path)[path[-1]] = value
-                    elif edit_typ == "delete":
-                        path = edit["path"]
-                        del goto_path(d, path)[path[-1]]
-                    elif edit_typ == "insert":
-                        path = edit["path"]
-                        array = goto_path(d, path)
-                        array.insert(path[-1], edit["value"])
-                    else:
-                        raise Exception(f"Unexpected edit type: {edit_typ}")
-            change = doc_.local_changes.pop()
-        elif typ == "assert_change_equal":
-            # The time is the one value that is non-deterministic
-            change["time"] = 0
-            self.assertEqual(change, step["to"])
-        elif typ == "apply_patch":
-            # breakpoint()
-            destringify_keys(step["patch"])
-            doc_.apply_patch(step["patch"])
-        elif typ == "assert_conflicts_equal":
-            to, path = step["to"], step["path"]
-            self.assertEqual(doc_.get_recent_ops(path), to)
-        else:
-            raise Exception(f"Unknown step type: {typ}")
+    for idx, step in enumerate(steps):
+        try:
+            typ = step["type"]
+            if typ == "create_doc":
+                params = step["params"] if "params" in step else {}
+                kwargs = {}
+                if "data" in params:
+                    kwargs["initial_data"] = params["data"]
+                if "actor_id" in params:
+                    kwargs["actor_id"] = params["actor_id"]
+                doc_ = doc.Doc(**kwargs)
+            elif typ == "assert_doc_equal":
+                # Could use `doc_` instead `get_active_root_obj`
+                # but this would make error messages less nice
+                self.assertEqual(doc_.get_active_root_obj(), step["to"])
+            elif typ == "change_doc":
+                with doc_ as d:
+                    for edit in step["trace"]:
+                        edit_typ = edit["type"]
+                        if edit_typ == "set":
+                            path, value = edit["path"], edit["value"]
+                            goto_path(d, path)[path[-1]] = value
+                        elif edit_typ == "delete":
+                            path = edit["path"]
+                            del goto_path(d, path)[path[-1]]
+                        elif edit_typ == "insert":
+                            path = edit["path"]
+                            array = goto_path(d, path)
+                            array.insert(path[-1], edit["value"])
+                        else:
+                            raise Exception(f"Unexpected edit type: {edit_typ}")
+                change = doc_.local_changes.pop()
+            elif typ == "assert_change_equal":
+                # The time is the one value that is non-deterministic
+                change["time"] = 0
+                self.assertEqual(change, step["to"])
+            elif typ == "apply_patch":
+                destringify_keys(step["patch"])
+                doc_.apply_patch(step["patch"])
+            elif typ == "assert_conflicts_equal":
+                to, path = step["to"], step["path"]
+                self.assertEqual(doc_.get_recent_ops(path), to)
+            elif typ == "assert_in_flight_equal":
+                expected = step["to"]
+                self.assertEqual(len(expected), len(doc_.in_flight_local_changes))
+                for (a, b) in zip(expected, doc_.in_flight_local_changes):
+                    self.assertEqual(a["seq"], b)
+            else:
+                raise Exception(f"Unknown step type: {typ}")
+        except Exception as e:
+            print(f"Exception in test: {name} on step #{idx}: {step}")
+            raise e
 
 
 def create_test_wrapper(steps, name):
@@ -87,8 +95,8 @@ def create_test_wrapper(steps, name):
     return wrapper
 
 
-# SECTION_MATCH = "apply"
-# TEST_MATCH = "should_delete_list"
+# SECTION_MATCH = "backend concurrency"
+# TEST_MATCH = "should_remove_pending"
 SECTION_MATCH = None
 TEST_MATCH = None
 
