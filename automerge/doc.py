@@ -53,6 +53,7 @@ class Doc(MutableMapping):
         self.ctx = None
         self.seq = 0
         self.max_op = 0
+        self.deps_of_last_received_patch = []
 
         self.root_obj = Map([], "_root", {})
         if initial_data:
@@ -72,11 +73,17 @@ class Doc(MutableMapping):
             if len(self.in_flight_local_changes) == 0:
                 # we've "caught up" (the backed has processed all active local changes and sent back patches for each of them)
                 self.optimistic_root_obj = None
+        self.deps_of_last_received_patch = patch["deps"]
 
         # We're caught up
         if self.optimistic_root_obj == None:
-            # TODO: Explain the intuition for why we only
-            # use the patch's `maxOp` if we're caught up
+            # The `max_op` field is used for generating the `start_op` of new changes
+            # `start_op` is the largest op counter that the actor has seen, across all actors
+            # When we're in a reconciled state (no optimistic fork), then the `max_op` is the last
+            # `max_op` we've received from the backend. When we're in an unreconciled state,
+            # the `max_op` is the largest `max_op` we have produced a change for, this is because
+            # from the perspective of the changes being generated, we haven't yet seen the latest
+            # backend changes, we're still waiting for them to be reconciled.
             self.max_op = patch["maxOp"]
 
         # TODO: Why do we look at clock seq instead of using patch["seq"]?
@@ -150,7 +157,9 @@ class Doc(MutableMapping):
             "actor": self.actor_id,
             "seq": self.seq,
             "startOp": self.max_op + 1,
-            "deps": [],
+            "deps": self.deps_of_last_received_patch
+            if len(self.in_flight_local_changes) == 0
+            else [],
             "ops": self.ctx.ops,
             # TODO: Use unix timestamp
             "time": 12345,

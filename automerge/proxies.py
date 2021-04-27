@@ -25,7 +25,7 @@ class MapProxy(MutableMapping):
             def cb(subpatch):
                 preds = self.assoc_obj.get_pred(key)
                 (value_patch, op_id) = self.ctx.set_value(
-                    self.assoc_obj.object_id, key, val
+                    self.assoc_obj.object_id, key, val, pred=preds
                 )
                 subpatch["props"][key] = {op_id: value_patch}
 
