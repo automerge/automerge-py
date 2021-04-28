@@ -157,6 +157,17 @@ class Doc(MutableMapping):
             "actor": self.actor_id,
             "seq": self.seq,
             "startOp": self.max_op + 1,
+            # (Probably correct explanation): There are 2 scenarios:
+            # - a local change generated after a non-local change
+            # - a local change generated after another local change
+            # In case A, the local change's deps should be the deps of the
+            # non-local change??
+            # In case B, the the local change's deps would be solely be the
+            # hash of the previous local change. But the frontend does not have to add
+            # this dep because the backend will always add the local actor's last change as a dep,
+            # so we just send an empty array. This is done so the frontend doesn't need
+            # to know how to encode/hash changes. (see backend/index.js:applyLocalChange for more
+            # info)
             "deps": self.deps_of_last_received_patch
             if len(self.in_flight_local_changes) == 0
             else [],
