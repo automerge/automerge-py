@@ -1122,6 +1122,8 @@ const tests = {
   ],
   // SKIP: dont_allow_out_of_order_request_patches (requires asserting a method throws or returns an error)
   // better to just do this test natively since it's the only assertion of this type
+  // should_allow_interleaving_of_patches_and_changes,
+  // deps_are_filled_in_if_the_frontend_does_not_have_the_latest_patch
   "backend concurrency": [
     {
       name: "should use version and sequence number from the backend",
@@ -1246,6 +1248,10 @@ const tests = {
         {
           type: "assert_in_flight_equal",
           to: [{ seq: 2 }],
+        },
+        {
+          type: "assert_doc_equal",
+          to: { blackbirds: 24, partridges: 1 },
         },
         {
           type: "apply_patch",
