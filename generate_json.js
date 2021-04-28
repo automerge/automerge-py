@@ -433,6 +433,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 1,
+            deps: [],
             clock: { "02ef21f3c9eb4087880ebedd7c4bbe43": 1 },
             diffs: {
               objectId: "_root",
@@ -461,6 +462,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 2,
+            deps: [],
             clock: {
               "02ef21f3c9eb4087880ebedd7c4bbe43": 1,
               "2a1d376b24f744008d4af58252d644dd": 2,
@@ -501,6 +503,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 3,
+            deps: [],
             clock: { "2a1d376b24f744008d4af58252d644dd": 1 },
             diffs: {
               objectId: "_root",
@@ -535,6 +538,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 2,
+            deps: [],
             clock: { "2a1d376b24f744008d4af58252d644dd": 1 },
             diffs: {
               objectId: "_root",
@@ -564,6 +568,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 3,
+            deps: [],
             clock: { "2a1d376b24f744008d4af58252d644dd": 2 },
             diffs: {
               objectId: "_root",
@@ -598,6 +603,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 2,
+            deps: [],
             clock: {
               "02ef21f3c9eb4087880ebedd7c4bbe43": 1,
               "2a1d376b24f744008d4af58252d644dd": 1,
@@ -650,6 +656,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 1,
+            deps: [],
             clock: {
               "02ef21f3c9eb4087880ebedd7c4bbe43": 2,
               "2a1d376b24f744008d4af58252d644dd": 1,
@@ -703,6 +710,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 2,
+            deps: [],
             clock: { "02ef21f3c9eb4087880ebedd7c4bbe43": 1 },
             diffs: {
               objectId: "_root",
@@ -724,6 +732,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 3,
+            deps: [],
             clock: { "02ef21f3c9eb4087880ebedd7c4bbe43": 2 },
             diffs: {
               objectId: "_root",
@@ -748,6 +757,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 2,
+            deps: [],
             clock: { [actor_id]: 1 },
             diffs: {
               objectId: "_root",
@@ -784,6 +794,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 1,
+            deps: [],
             clock: { actor_id: 1 },
             diffs: {
               objectId: "_root",
@@ -815,6 +826,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 3,
+            deps: [],
             clock: { actor_id: 2 },
             diffs: {
               objectId: "_root",
@@ -851,6 +863,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 2,
+            deps: [],
             clock: { [actor]: 1, [other_actor_1]: 1, [other_actor_2]: 1 },
             diffs: {
               objectId: "_root",
@@ -919,6 +932,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 5,
+            deps: [],
             clock: { [other_actor_1]: 2, [other_actor_2]: 1 },
             diffs: {
               objectId: "_root",
@@ -966,6 +980,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 3,
+            deps: [],
             clock: { [actor]: 1 },
             diffs: {
               objectId: "_root",
@@ -994,6 +1009,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 4,
+            deps: [],
             clock: { [actor]: 2 },
             diffs: {
               objectId: "_root",
@@ -1022,6 +1038,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 6,
+            deps: [],
             clock: { [actor]: 1 },
             diffs: {
               objectId: "_root",
@@ -1072,6 +1089,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 7,
+            deps: [],
             clock: { [actor]: 2 },
             diffs: {
               objectId: "_root",
@@ -1237,6 +1255,7 @@ const tests = {
             actor,
             seq: 1,
             maxOp: 4,
+            deps: [],
             clock: { [actor]: 1 },
             diffs: {
               objectId: "_root",
@@ -1259,6 +1278,7 @@ const tests = {
             actor,
             seq: 2,
             maxOp: 5,
+            deps: [],
             clock: { [actor]: 2 },
             diffs: {
               objectId: "_root",
@@ -1314,6 +1334,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             maxOp: 10,
+            deps: [],
             clock: { [other_actor_1]: 1 },
             diffs: {
               objectId: "_root",
@@ -1336,6 +1357,7 @@ const tests = {
             actor,
             seq: 1,
             maxOp: 11,
+            deps: [],
             clock: { [actor]: 1, [other_actor_1]: 1 },
             diffs: {
               objectId: "_root",
@@ -1368,6 +1390,7 @@ const tests = {
             actor,
             seq: 1,
             maxOp: 1,
+            deps: [],
             clock: { [actor]: 1 },
             diffs: {
               objectId: "_root",
@@ -1404,6 +1427,7 @@ const tests = {
           type: "apply_patch",
           patch: {
             clock: { [actor]: 1, [other_actor_1]: 1 },
+            deps: [],
             diffs: {
               objectId: "_root",
               type: "map",
@@ -1440,6 +1464,7 @@ const tests = {
             actor,
             seq: 2,
             maxOp: 3,
+            deps: [],
             clock: { [actor]: 2, [other_actor_1]: 1 },
             diffs: {
               objectId: "_root",
