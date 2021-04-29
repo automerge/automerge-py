@@ -1,7 +1,7 @@
 from functools import cmp_to_key
 from typing import NamedTuple
 import re
-from .datatypes import Map, List
+from .datatypes import Map, List, Counter
 
 OpId = NamedTuple("OpId", [("counter", int), ("actorId", str)])
 OP_ID_RE = re.compile("^(\d+)@(.*)$")
@@ -37,7 +37,7 @@ def get_value(conflict, patch):
             conflict = Map([], patch["objectId"])
         return apply_patch(conflict, patch)
     elif "datatype" in patch:
-        pass
+        return Counter(patch["value"])
     else:
         # primitive (number, string, boolean, null)
         return patch["value"]

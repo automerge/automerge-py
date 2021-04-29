@@ -422,6 +422,133 @@ const tests = {
         },
       ],
     },
+    {
+      name: "should handle counters inside maps",
+      steps: [
+        { type: "create_doc", params: { actor_id } },
+        {
+          type: "change_doc",
+          trace: [{ type: "set", path: ["wrens"], value: "VALUETOCOUNTER:0" }],
+        },
+        { type: "assert_doc_equal", to: { wrens: "VALUETOCOUNTER:0" } },
+        {
+          type: "assert_change_equal",
+          to: {
+            actor,
+            seq: 1,
+            time: 0,
+            message: "",
+            startOp: 1,
+            deps: [],
+            ops: [
+              {
+                obj: "_root",
+                action: "set",
+                key: "wrens",
+                insert: false,
+                value: 0,
+                datatype: "counter",
+                pred: [],
+              },
+            ],
+          },
+        },
+        {
+          type: "change_doc",
+          trace: [{ type: "increment", path: ["wrens"], delta: 1 }],
+        },
+        { type: "assert_doc_equal", to: { wrens: "VALUETOCOUNTER:1" } },
+        {
+          type: "assert_change_equal",
+          to: {
+            actor,
+            seq: 2,
+            time: 0,
+            message: "",
+            startOp: 2,
+            deps: [],
+            ops: [
+              {
+                obj: "_root",
+                action: "inc",
+                key: "wrens",
+                insert: false,
+                value: 1,
+                pred: [`1@${actor}`],
+              },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      name: "should handle counters inside lists",
+      steps: [
+        { type: "create_doc", params: { actor_id } },
+        {
+          type: "change_doc",
+          trace: [
+            { type: "set", path: ["counts"], value: ["VALUETOCOUNTER:1"] },
+          ],
+        },
+        {
+          type: "assert_change_equal",
+          to: {
+            actor,
+            deps: [],
+            seq: 1,
+            time: 0,
+            message: "",
+            startOp: 1,
+            ops: [
+              {
+                obj: "_root",
+                action: "makeList",
+                key: "counts",
+                insert: false,
+                pred: [],
+              },
+              {
+                obj: `1@${actor}`,
+                action: "set",
+                elemId: "_head",
+                insert: true,
+                value: 1,
+                datatype: "counter",
+                pred: [],
+              },
+            ],
+          },
+        },
+        { type: "assert_doc_equal", to: { counts: ["VALUETOCOUNTER:1"] } },
+        {
+          type: "change_doc",
+          trace: [{ type: "increment", path: ["counts", 0], delta: 2 }],
+        },
+        {
+          type: "assert_change_equal",
+          to: {
+            actor,
+            deps: [],
+            seq: 2,
+            time: 0,
+            message: "",
+            startOp: 3,
+            ops: [
+              {
+                obj: `1@${actor}`,
+                action: "inc",
+                elemId: `2@${actor}`,
+                insert: false,
+                value: 2,
+                pred: [`2@${actor}`],
+              },
+            ],
+          },
+        },
+        { type: "assert_doc_equal", to: { counts: ["VALUETOCOUNTER:3"] } },
+      ],
+    },
   ],
   // SKIP: should structure share unmodified objects
   "applying patches": [

@@ -56,7 +56,7 @@
 from typing import Any, TypedDict
 
 from .apply_patch import apply_patch
-from .datatypes import Map, List
+from .datatypes import Map, List, Counter
 
 
 class Context:
@@ -78,6 +78,8 @@ class Context:
         """
         if isinstance(val, Map) or isinstance(val, List):
             return {"objectId": val.object_id, "type": val.type}
+        elif isinstance(val, Counter):
+            return {"value": int(val), "datatype": "counter"}
         else:
             return {"value": val}
 

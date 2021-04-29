@@ -222,4 +222,6 @@ class TestBackendConcurrency(unittest.TestCase):
         )
 
         patch4, bin_change4 = b2.apply_local_change(change4)
-        self.assertEqual(decode_change(bin_change4)['deps'], [decode_change(bin_change3)['hash']])
+        self.assertEqual(
+            decode_change(bin_change4)["deps"], [decode_change(bin_change3)["hash"]]
+        )
