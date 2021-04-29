@@ -19,6 +19,11 @@ class MapProxy(MutableMapping):
         if not isinstance(key, str):
             raise Exception("TODO: msg")
         setting_new_value = key not in self.assoc_obj
+        # it is not possible to overwrite counters. We don't need to set
+        # a value/apply a patch b/c the `CounterProxy` class does that for us
+        # the one issue is we silently fail instead of throwing an exception
+        # we can't throw an exception b/c __setitem__ will always be called
+        # when doing `d["foo"] += 3` even though __add__ is called first
         if not setting_new_value and isinstance(self.assoc_obj[key], Counter):
             return
 
@@ -96,6 +101,7 @@ class ListProxy(MutableSequence):
         if idx < 0 or idx >= len(self.assoc_list):
             raise IndexError(idx)
 
+        # See the comment in the map version
         if isinstance(self.assoc_list[idx], Counter):
             return
 
