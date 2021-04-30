@@ -138,7 +138,12 @@ class Doc(MutableMapping):
         active_obj = None
         if self.backend:
             # if we have an integrated backend then there's no optimistic state/fork
-            active_obj = self.root_obj
+            # we deepcopy so that the changes inside the change block are applied to the copy (duh!)
+            # otherwise, we'd apply patches to the root object twice
+            # (once inside the change block, as we generate patches on the fly, once when we get a patch from the backend)
+            # this doesn't cause an issue for setting k/v pairs, since that's idempotent
+            # but it breaks non-idempotent ops list inserts, deletes on lists/maps, etc.
+            active_obj = deepcopy(self.root_obj)
         else:
             # everytime we enter a change block we're generating a local change,
             # when we create a local change, we fork a copy of the state (if it has not already been forked)

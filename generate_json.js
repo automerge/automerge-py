@@ -356,7 +356,7 @@ const tests = {
     {
       name: "should insert into lists after initial list is created",
       steps: [
-          { type: "create_doc", params: {actor_id, data: { foo: [] }}},
+        { type: "create_doc", params: {actor_id, data: { foo: [] }}},
         { type: "assert_doc_equal", to: { foo: [] } },
         {
           type: "change_doc",

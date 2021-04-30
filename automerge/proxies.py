@@ -27,11 +27,13 @@ class MapProxy(MutableMapping):
         if not setting_new_value and isinstance(self.assoc_obj[key], Counter):
             return
 
-        # TODO: Do better equals & implement conflict check
-        if setting_new_value or self.assoc_obj[key] != val:
+        # TODO: Do better equals (deep equals instead of reference equals)
+        # TODO: Should we be using `get_pred` (the implementation is currently the same
+        # as what we want to do, but unclear if the semantic intent is the same)
+        preds = self.assoc_obj.get_pred(key)
+        if setting_new_value or self.assoc_obj[key] != val or len(preds) > 1:
 
             def cb(subpatch):
-                preds = self.assoc_obj.get_pred(key)
                 (value_patch, op_id) = self.ctx.set_value(
                     self.assoc_obj.object_id, key, val, pred=preds
                 )
@@ -105,10 +107,13 @@ class ListProxy(MutableSequence):
         if isinstance(self.assoc_list[idx], Counter):
             return
 
-        # TODO: check conflicts
-        if self.assoc_list[idx] != val:
+        # If the assigned list element value is the same as the existing value, and
+        # the assignment does not resolve a conflict, do nothing
+
+        preds = self.assoc_list.get_pred(idx)
+        # if `preds` > 1 then there are multiple possibilities (there's a conflict)
+        if self.assoc_list[idx] != val or len(preds) > 1:
             elem_id = self.assoc_list.elem_ids[idx]
-            preds = self.assoc_list.get_pred(idx)
 
             def cb(subpatch):
                 (value_patch, op_id) = self.ctx.set_value(
