@@ -1,4 +1,5 @@
 import uuid
+from datetime import timezone, datetime
 from typing import Optional, Any
 from copy import deepcopy
 from collections import deque
@@ -16,10 +17,16 @@ class Doc(MutableMapping):
         actor_id: Optional[str] = None,
         initial_data: Optional[dict[Any, Any]] = None,
         backend=None,
+        timestamper=None,
     ) -> None:
         if actor_id is None:
             # QUESTION: Why do we remove "-"?
             actor_id = str(uuid.uuid4()).replace("-", "")
+
+        if timestamper is None:
+            self.timestamper = lambda: int(datetime.now(tz=timezone.utc).timestamp())
+        else:
+            self.timestamper = timestamper
 
         # Automerge has a frontend/backend split
         # The backend is the Rust core that implements all the actual CRDT logic
@@ -62,8 +69,9 @@ class Doc(MutableMapping):
                     d[k] = v
 
     def apply_patch(self, patch):
-        if "actor" in patch and patch["actor"] == self.actor_id:
-            # it's a patch generated from a local change we made
+        if not self.backend and "actor" in patch and patch["actor"] == self.actor_id:
+            # it's a patch generated from a local change we made & we're not using
+            # an integrated backend
             expected_seq = self.in_flight_local_changes[0]
             if patch["seq"] != expected_seq:
                 raise Exception(
@@ -76,7 +84,7 @@ class Doc(MutableMapping):
         self.deps_of_last_received_patch = patch["deps"]
 
         # We're caught up
-        if self.optimistic_root_obj == None:
+        if not self.backend and self.optimistic_root_obj == None:
             # The `max_op` field is used for generating the `start_op` of new changes
             # `start_op` is the largest op counter that the actor has seen, across all actors
             # When we're in a reconciled state (no optimistic fork), then the `max_op` is the last
@@ -168,12 +176,14 @@ class Doc(MutableMapping):
             # so we just send an empty array. This is done so the frontend doesn't need
             # to know how to encode/hash changes. (see backend/index.js:applyLocalChange for more
             # info)
+            # And if there's a backend, we're in integrated mode & none of this matters (we can
+            # always just send the last patch's deps)
             "deps": self.deps_of_last_received_patch
-            if len(self.in_flight_local_changes) == 0
+            if self.backend or len(self.in_flight_local_changes) == 0
             else [],
             "ops": self.ctx.ops,
             # TODO: Use unix timestamp
-            "time": 12345,
+            "time": self.timestamper(),
             "message": "",
         }
         self.max_op = self.max_op + len(self.ctx.ops)
@@ -187,3 +197,32 @@ class Doc(MutableMapping):
         else:
             self.local_changes.append(change)
             self.in_flight_local_changes.append(change["seq"])
+
+    def _assert_backend(self):
+        if self.backend is None:
+            raise Exception(
+                "Cannot call convenience wrapper method without integrated backend"
+            )
+
+    # Just convenience wrappers around self.backend (if it exists)
+    def generate_sync_message(self, sync_state):
+        self._assert_backend()
+        return self.backend.generate_sync_message(sync_state)
+
+    def receive_sync_message(self, sync_state, msg):
+        self._assert_backend()
+        return self.backend.receive_sync_message(sync_state, msg)
+
+    def apply_changes(self, changes):
+        self._assert_backend()
+        patch = self.backend.apply_changes(changes)
+        self.apply_patch(patch)
+        return patch
+
+    def get_heads(self):
+        self._assert_backend()
+        return self.backend.get_heads()
+
+    def get_all_changes(self):
+        self._assert_backend()
+        return self.backend.get_all_changes()

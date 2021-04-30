@@ -1,6 +1,6 @@
 import unittest
 from automerge import doc
-from automerge_backend import PyBackend, decode_change
+from automerge_backend import Backend, decode_change
 from uuid import uuid4
 
 
@@ -79,7 +79,7 @@ class TestBackendConcurrency(unittest.TestCase):
             },
         )
 
-        b0 = PyBackend.create()
+        b0 = Backend()
         patch0, bin_change0 = b0.apply_local_change(change0)
 
         d0.apply_patch(patch0)
@@ -116,10 +116,10 @@ class TestBackendConcurrency(unittest.TestCase):
         doc1 = doc.Doc(initial_data={"number": 1}, actor_id=actor1)
         change1 = doc1.local_changes.pop()
 
-        b1 = PyBackend.create()
+        b1 = Backend()
         patch1, bin_change1 = b1.apply_local_change(change1)
 
-        b2 = PyBackend.create()
+        b2 = Backend()
         patch1a = b2.apply_changes([bin_change1])
 
         doc1a = doc.Doc(actor_id=actor2)

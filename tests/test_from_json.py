@@ -1,40 +1,13 @@
-import unittest
 import re
 from automerge import doc
 from automerge.datatypes import Counter
 from uuid import uuid4
 import json
 
-
-def goto_path(obj, path):
-    temp = obj
-    for segment in path[:-1]:
-        temp = temp[segment]
-    return temp
-
+from .from_json_utils import traverse, goto_path, run_tests_from_json
 
 KEY_TO_INT_SIGNAL = "KEYTOINT:"
 VALUE_TO_COUNTER_SIGNAL = "VALUETOCOUNTER:"
-
-
-def traverse(d, cb):
-    # the wrapper handles the case where d is a primitive like "VALUETOCOUNTER:0"
-    wrapper = {"temp": d}
-    _traverse(wrapper, cb)
-    return wrapper["temp"]
-
-
-def _traverse(d, cb):
-    if isinstance(d, dict):
-        for k in list(d.keys()):
-            v = d[k]
-            cb(d, k, v)
-            _traverse(v, cb)
-    elif isinstance(d, list):
-        for idx, v in enumerate(d):
-            cb(d, idx, v)
-            _traverse(v, cb)
-
 
 def destringify_keys(d):
     def cb(d, k, v):
@@ -45,7 +18,6 @@ def destringify_keys(d):
             k_as_int = int(s_int)
             d[k_as_int] = v
             del d[k]
-
     return traverse(d, cb)
 
 
@@ -54,7 +26,6 @@ def deserialize_counters(d):
         if isinstance(v, str) and v.startswith(VALUE_TO_COUNTER_SIGNAL):
             counter = Counter(int(v[len(VALUE_TO_COUNTER_SIGNAL) :]))
             d[k] = counter
-
     return traverse(d, cb)
 
 
@@ -121,35 +92,4 @@ def run_test(self, steps, name):
             print(f"Exception in test: {name} on step #{idx}: {step}")
             raise e
 
-
-def create_test_wrapper(steps, name):
-    def wrapper(self):
-        self.maxDiff = None
-        run_test(self, steps, name)
-
-    return wrapper
-
-
-# SECTION_MATCH = "performing changes"
-# TEST_MATCH = "should_handle_counters"
-SECTION_MATCH = None
-TEST_MATCH = None
-
-with open("frontend_tests.json", "r") as f:
-    tests = json.loads(f.read())
-    for (section_name, section_tests) in tests.items():
-        if SECTION_MATCH and SECTION_MATCH not in section_name:
-            continue
-        test_methods = {}
-        for test in section_tests:
-            name = test["name"].replace(" ", "_")
-            name = f"test_{name}"
-            if (not TEST_MATCH) or (TEST_MATCH in name):
-                test_methods[name] = create_test_wrapper(test["steps"], name)
-        section_name = section_name.replace(" ", "_")
-        section_name = section_name.upper()
-        test_klass = type(section_name, (unittest.TestCase,), test_methods)
-        globs = globals()
-        globs[section_name] = test_klass
-        # Prevent the tests in the last test group from running twice.
-        test_klass = None
+run_tests_from_json("frontend_tests.json", run_test, globals(), SECTION_MATCH=None, TEST_MATCH=None, PRINT_NAME=True)

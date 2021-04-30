@@ -34,7 +34,11 @@ def get_value(conflict, patch):
         if conflict and conflict.object_id != patch["objectId"]:
             # if the object ids are different then the patch is
             # replacing the object with a new one made from scratch
-            conflict = Map([], patch["objectId"])
+            if patch["type"] == "map":
+                conflict = Map([], patch["objectId"])
+            else:
+                assert patch["type"] == "list"
+                conflict = List([], patch["objectId"])
         return apply_patch(conflict, patch)
     elif "datatype" in patch:
         return Counter(patch["value"])
@@ -109,14 +113,25 @@ def update_list_obj(listobj, props, edits):
 
 def apply_patch(obj, patch):
     if obj is not None and "props" not in patch and "edits" not in patch:
-        # TODO: null check?
+        # TODO: for some reason, this property was mysteriously set
+        # even when it was never implemented on the `Map` datatype
+        obj._frozen = True
         return obj
 
+    if obj:
+        obj._frozen = False
+    # don't need the `ret` thing now, but in the future we might
+    # (probably a bad reason??)
+    ret = None
     if patch["type"] == "map":
         apply_properties(obj, patch["props"])
-        return obj
+        ret = obj
     elif patch["type"] == "list":
         update_list_obj(obj, patch["props"], patch["edits"])
-        return obj
+        ret = obj
     else:
         raise Exception(f"Unknown object type in patch: {patch['type']}")
+
+    if obj:
+        obj._frozen = True
+    return ret

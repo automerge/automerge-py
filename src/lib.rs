@@ -1,5 +1,5 @@
 use automerge::{Backend, Change};
-use automerge_backend::AutomergeError;
+use automerge_backend::{AutomergeError, SyncMessage, SyncState};
 use automerge_protocol::{ChangeHash, UncompressedChange};
 
 use pyo3::create_exception;
@@ -8,9 +8,15 @@ use pyo3::types::{PyAny, PyBytes, PyList};
 use pyo3::wrap_pyfunction;
 use pythonize::{depythonize, pythonize};
 
-#[pyclass(unsendable)]
+// PyBackend and PySyncState are opaque pointers
+#[pyclass(unsendable, name = "Backend")]
 struct PyBackend {
     backend: Backend,
+}
+
+#[pyclass(unsendable, name = "SyncState")]
+struct PySyncState {
+    state: SyncState,
 }
 
 #[pymethods]
@@ -38,11 +44,11 @@ impl PyBackend {
         Ok(())
     }
 
-    #[staticmethod]
-    fn create() -> PyResult<PyBackend> {
-        Ok(PyBackend {
+    #[new]
+    fn new() -> Self {
+        PyBackend {
             backend: Backend::init(),
-        })
+        }
     }
 
     #[staticmethod]
@@ -72,16 +78,26 @@ impl PyBackend {
         Ok(bytes)
     }
 
-    pub fn get_changes(&self, deps: &PyList) -> PyResult<Vec<Py<PyBytes>>> {
-        let deps: Vec<ChangeHash> = depythonize(&deps)?;
+    pub fn get_all_changes(&self) -> PyResult<Vec<Py<PyBytes>>> {
+        self.get_changes(None)
+    }
+
+    // I don't really want the API to accept an `Option` but its the easiest
+    // way to implement `get_all_changes` (otherwise, I'd need to construct an empty `PyList`)
+    pub fn get_changes(&self, deps: Option<&PyList>) -> PyResult<Vec<Py<PyBytes>>> {
+        let deps: Vec<ChangeHash> = match deps {
+            Some(deps) => depythonize(&deps)?,
+            None => vec![],
+        };
         let changes = self.backend.get_changes(&deps);
-        let gil = Python::acquire_gil();
-        let py = gil.python();
         Ok(export_changes(changes))
     }
 
     pub fn get_missing_deps(&self) -> PyResult<Py<PyAny>> {
-        let deps = self.backend.get_missing_deps();
+        // TODO: ensure this usage of `get_missing_deps` is correct
+        // (we previously did not need to pass in heads)
+        let heads = self.backend.get_heads();
+        let deps = self.backend.get_missing_deps(&heads);
         let gil = Python::acquire_gil();
         let py = gil.python();
         Ok(pythonize(py, &deps)?)
@@ -92,6 +108,51 @@ impl PyBackend {
         let py = gil.python();
         let heads = pythonize(py, &self.backend.get_heads())?;
         Ok(heads)
+    }
+
+    // methods for the sync protocol
+    pub fn generate_sync_message(
+        &self,
+        sync_state: &mut PySyncState,
+    ) -> PyResult<Option<Py<PyBytes>>> {
+        let msg = self.backend.generate_sync_message(&mut sync_state.state);
+        Ok(match msg {
+            Some(m) => {
+                // The JS version returns the SyncMessage as a binary blob to improve pef
+                // The Rust API doesn't b/c there's no perf improvement to encoding a Rust struct
+                // as a binary blob. We use the Rust API & encode to a binary blob b/c
+                // 1. improves perf??
+                // 2. simplicity -- don't need to deal with sending complex objects between Rust &
+                //  Python
+                let bytes = m.encode().to_py_err()?;
+                let gil = Python::acquire_gil();
+                let py = gil.python();
+                let bytes = PyBytes::new(py, &bytes);
+                Some(bytes.into_py(py))
+            }
+            None => None,
+        })
+    }
+
+    pub fn receive_sync_message(
+        &mut self,
+        sync_state: &mut PySyncState,
+        msg: &[u8],
+    ) -> PyResult<Option<Py<PyAny>>> {
+        let msg = SyncMessage::decode(msg).to_py_err()?;
+        let patch = self
+            .backend
+            .receive_sync_message(&mut sync_state.state, msg)
+            .to_py_err()?;
+        Ok(match patch {
+            Some(p) => {
+                let gil = Python::acquire_gil();
+                let py = gil.python();
+                let patch = pythonize(py, &p)?;
+                Some(patch)
+            }
+            None => None,
+        })
     }
 }
 
@@ -163,12 +224,32 @@ fn decode_change(change: &PyBytes) -> PyResult<Py<PyAny>> {
     Ok(pythonize(py, &change)?)
 }
 
+// for sync protocol
+#[pyfunction]
+fn default_sync_state() -> PySyncState {
+    PySyncState {
+        state: SyncState {
+            ..Default::default()
+        },
+    }
+}
+
+// TODO: wait for serde to be implemented on sync message
+//#[pyfunction]
+//fn decode_sync_message(bytes: &[u8]) -> PyResult<Py<PyAny>> {
+//    let msg = SyncMessage::decode(bytes).to_py_err()?;
+//    let gil = Python::acquire_gil();
+//    let py = gil.python();
+//    //let msg = pythonize(py, &msg);
+//}
+
 #[pymodule(automerge_backend)]
 fn automerge_backend(py: Python, m: &PyModule) -> PyResult<()> {
     //m.add_function(wrap_pyfunction!(init, m)?)?;
     //m.add_function(wrap_pyfunction!(load, m)?)?;
     m.add_function(wrap_pyfunction!(encode_change, m)?)?;
     m.add_function(wrap_pyfunction!(decode_change, m)?)?;
+    m.add_function(wrap_pyfunction!(default_sync_state, m)?)?;
     m.add_class::<PyBackend>()?;
     m.add("AutomergeError", py.get_type::<PyAutomergeError>())?;
     Ok(())

@@ -351,6 +351,52 @@ const tests = {
         },
       ],
     },
+    // This test was not necessary b/c the bug was something else
+    // but now that I've written it, might as well have it
+    {
+      name: "should insert into lists after initial list is created",
+      steps: [
+          { type: "create_doc", params: {actor_id, data: { foo: [] }}},
+        { type: "assert_doc_equal", to: { foo: [] } },
+        {
+          type: "change_doc",
+          trace: [
+            { type: "insert", path: ["foo", 0], value: 1 },
+            { type: "insert", path: ["foo", 1], value: 2 },
+          ],
+        },
+        { type: "assert_doc_equal", to: { foo: [1, 2] } },
+        {
+          type: "assert_change_equal",
+          to: {
+            actor,
+            seq: 2,
+            startOp: 2,
+            deps: [],
+            time: 0,
+            message: "",
+            ops: [
+              {
+                action: "set",
+                obj: `1@${actor}`,
+                elemId: "_head",
+                insert: true,
+                pred: [],
+                value: 1,
+              },
+              {
+                action: "set",
+                obj: `1@${actor}`,
+                elemId: `2@${actor}`,
+                insert: true,
+                pred: [],
+                value: 2,
+              },
+            ],
+          },
+        },
+      ],
+    },
     {
       name: "should apply updates inside lists",
       steps: [
