@@ -70,7 +70,6 @@ def override_mutable_methods(instance, super_class, names):
 
 def create_no_mutation_wrapper(method):
     def wrapper(self, *args, **kwargs):
-        print("calling: " + method.__name__)
         if self._frozen == True:
             raise Exception(
                 f'Cannot call mutating method: "{method.__name__}" on {self} outside of change block'

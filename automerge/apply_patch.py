@@ -112,14 +112,16 @@ def update_list_obj(listobj, props, edits):
 
 
 def apply_patch(obj, patch):
-    if obj is not None and "props" not in patch and "edits" not in patch:
+    not_none = obj is not None
+    if not_none:
+        obj._frozen = False
+
+    if not_none and "props" not in patch and "edits" not in patch:
         # TODO: for some reason, this property was mysteriously set
         # even when it was never implemented on the `Map` datatype
         obj._frozen = True
         return obj
 
-    if obj:
-        obj._frozen = False
     # don't need the `ret` thing now, but in the future we might
     # (probably a bad reason??)
     ret = None
@@ -132,6 +134,6 @@ def apply_patch(obj, patch):
     else:
         raise Exception(f"Unknown object type in patch: {patch['type']}")
 
-    if obj:
+    if not_none:
         obj._frozen = True
     return ret
