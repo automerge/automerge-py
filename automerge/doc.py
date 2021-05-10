@@ -216,7 +216,9 @@ class Doc(MutableMapping):
 
     def receive_sync_message(self, sync_state, msg):
         self._assert_backend()
-        return self.backend.receive_sync_message(sync_state, msg)
+        patch = self.backend.receive_sync_message(sync_state, msg)
+        if patch:
+            self.apply_patch(patch)
 
     def apply_changes(self, changes):
         self._assert_backend()
