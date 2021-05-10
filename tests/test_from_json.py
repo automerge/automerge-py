@@ -9,6 +9,7 @@ from .from_json_utils import traverse, goto_path, run_tests_from_json
 KEY_TO_INT_SIGNAL = "KEYTOINT:"
 VALUE_TO_COUNTER_SIGNAL = "VALUETOCOUNTER:"
 
+
 def destringify_keys(d):
     def cb(d, k, v):
         if not isinstance(k, str):
@@ -18,6 +19,7 @@ def destringify_keys(d):
             k_as_int = int(s_int)
             d[k_as_int] = v
             del d[k]
+
     return traverse(d, cb)
 
 
@@ -26,6 +28,7 @@ def deserialize_counters(d):
         if isinstance(v, str) and v.startswith(VALUE_TO_COUNTER_SIGNAL):
             counter = Counter(int(v[len(VALUE_TO_COUNTER_SIGNAL) :]))
             d[k] = counter
+
     return traverse(d, cb)
 
 
@@ -92,4 +95,12 @@ def run_test(self, steps, name):
             print(f"Exception in test: {name} on step #{idx}: {step}")
             raise e
 
-run_tests_from_json("frontend_tests.json", run_test, globals(), SECTION_MATCH=None, TEST_MATCH=None, PRINT_NAME=True)
+
+run_tests_from_json(
+    "frontend_tests.json",
+    run_test,
+    globals(),
+    SECTION_MATCH=None,
+    TEST_MATCH=None,
+    PRINT_NAME=True,
+)

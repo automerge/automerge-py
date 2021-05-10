@@ -20,6 +20,21 @@ struct PySyncState {
 }
 
 #[pymethods]
+impl PySyncState {
+    // TODO: This does a copy.That's probably
+    // fine (since not copying would introduce extreme complexity)
+    // but still... feels jank
+    // https://github.com/PyO3/pyo3/issues/1581
+    #[getter]
+    pub fn last_sent_heads(&self) -> PyResult<Py<PyAny>> {
+        let gil = Python::acquire_gil();
+        let py = gil.python();
+        let pythonized = pythonize(py, &self.state.last_sent_heads)?;
+        Ok(pythonized)
+    }
+}
+
+#[pymethods]
 impl PyBackend {
     pub fn apply_local_change(&mut self, change: &PyAny) -> PyResult<(Py<PyAny>, Py<PyBytes>)> {
         let change: UncompressedChange = depythonize(&change)?;
