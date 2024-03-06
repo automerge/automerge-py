@@ -183,6 +183,11 @@ impl Transaction {
         inner.keys(obj_id, heads)
     }
     
+    fn length(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<usize> {
+        let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
+        Ok(inner.length(obj_id, heads))
+    }
+    
     fn put(&mut self, obj_id: PyObjId, prop: PyProp, value: &PyAny) -> PyResult<()> {
         let mut inner = self.inner.write().map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
         let Some(tx) = inner.tx.as_mut() else {
