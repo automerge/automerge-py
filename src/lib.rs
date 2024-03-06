@@ -86,6 +86,26 @@ impl Inner {
             }
         }.map_err(|e| PyException::new_err(e.to_string()))
     }
+
+    fn marks(&self, py: Python, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<PyMark>> {
+        let res = if let Some(tx) = self.tx.as_ref() {
+            match get_heads(heads) {
+                Some(heads) => tx.marks_at(obj_id.0, &heads),
+                None => tx.marks(obj_id.0)
+            }
+        } else {
+            match get_heads(heads) {
+                Some(heads) => self.doc.marks_at(obj_id.0, &heads),
+                None => self.doc.marks(obj_id.0)
+            }
+        }.map_err(|e| PyException::new_err(e.to_string()))?;
+        Ok(res.iter().map(|m| PyMark {
+            start: m.start,
+            end: m.end,
+            name: m.name().to_owned(),
+            value: PyScalarValue(&m.value()).into_py(py),
+        }).collect())
+    }
 }
 
 #[pyclass]
@@ -159,6 +179,11 @@ impl Document {
         let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
         inner.text(obj_id, heads)
     }
+
+    fn marks(&self, py: Python, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<PyMark>> {
+        let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.marks(py, obj_id, heads)
+    }
 }
 
 #[derive(Clone)]
@@ -210,6 +235,11 @@ impl Transaction {
     fn text(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<String> {
         let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
         inner.text(obj_id, heads)
+    }
+
+    fn marks(&self, py: Python, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<PyMark>> {
+        let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.marks(py, obj_id, heads)
     }
     
     fn put(&mut self, obj_id: PyObjId, prop: PyProp, value: &PyAny) -> PyResult<()> {
@@ -380,24 +410,40 @@ impl IntoPy<PyObject> for PyObjType {
 }
 
 #[derive(Debug)]
+pub struct PyScalarValue<'a> (&'a am::ScalarValue);
+impl<'a> IntoPy<PyObject> for PyScalarValue<'a> {
+    fn into_py(self, py: Python<'_>) -> PyObject {
+        match self.0 {
+            ScalarValue::Bytes(v) => v.clone().into_py(py),
+            ScalarValue::Str(v) => v.to_owned().into_py(py),
+            ScalarValue::Int(v) => v.into_py(py),
+            ScalarValue::Uint(v) => v.into_py(py),
+            ScalarValue::F64(v) => v.into_py(py),
+            ScalarValue::Counter(v) => todo!(),
+            ScalarValue::Timestamp(v) => v.into_py(py),
+            ScalarValue::Boolean(v) => v.into_py(py),
+            ScalarValue::Unknown { type_code, bytes } => todo!(),
+            ScalarValue::Null => Python::None(py),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct PyValue<'a>(am::Value<'a>);
 
 impl<'a> IntoPy<PyObject> for PyValue<'a> {
     fn into_py(self, py: Python<'_>) -> PyObject {
         match self.0 {
             am::Value::Object(objtype) => PyObjType(objtype).into_py(py),
-            am::Value::Scalar(s) => match s.as_ref() {
-                ScalarValue::Bytes(v) => v.clone().into_py(py),
-                ScalarValue::Str(v) => v.to_owned().into_py(py),
-                ScalarValue::Int(v) => v.into_py(py),
-                ScalarValue::Uint(v) => v.into_py(py),
-                ScalarValue::F64(v) => v.into_py(py),
-                ScalarValue::Counter(v) => todo!(),
-                ScalarValue::Timestamp(v) => v.into_py(py),
-                ScalarValue::Boolean(v) => v.into_py(py),
-                ScalarValue::Unknown { type_code, bytes } => todo!(),
-                ScalarValue::Null => Python::None(py),
-            },
+            am::Value::Scalar(s) => PyScalarValue(&s).into_py(py),
         }
     }
+}
+
+#[pyclass]
+struct PyMark {
+    start: usize,
+    end: usize,
+    name: String,
+    value: PyObject,
 }
