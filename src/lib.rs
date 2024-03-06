@@ -21,6 +21,14 @@ impl Inner {
     }
 
     // Read methods go on Inner as they're callable from either Transaction or Document.
+    fn object_type(&self, obj_id: PyObjId) -> PyResult<PyObjType> {
+        if let Some(tx) = self.tx.as_ref() {
+            tx.object_type(obj_id.0)
+        } else {
+            self.doc.object_type(obj_id.0)
+        }.map_err(|e| PyException::new_err(e.to_string())).map(PyObjType::from_objtype)
+    }
+
     fn get(&self, py: Python, obj_id: PyObjId, prop: PyProp, heads: Option<Vec<PyChangeHash>>) -> PyResult<Option<(PyObject, PyObjId)>> {
         let res = if let Some(tx) = self.tx.as_ref() {
             match get_heads(heads) {
@@ -160,6 +168,11 @@ impl Document {
         Ok(inner.get_heads())
     }
 
+    fn object_type(&self, obj_id: PyObjId) -> PyResult<PyObjType> {
+        let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.object_type(obj_id)
+    }
+
     fn get(&self, py: Python, obj_id: PyObjId, prop: PyProp, heads: Option<Vec<PyChangeHash>>) -> PyResult<Option<(PyObject, PyObjId)>> {
         let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
         inner.get(py, obj_id, prop, heads)
@@ -217,6 +230,11 @@ impl Transaction {
         Ok(inner.get_heads())
     }
 
+    fn object_type(&self, obj_id: PyObjId) -> PyResult<PyObjType> {
+        let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.object_type(obj_id)
+    }
+
     fn get(&self, py: Python, obj_id: PyObjId, prop: PyProp, heads: Option<Vec<PyChangeHash>>) -> PyResult<Option<(PyObject, PyObjId)>> {
         let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
         inner.get(py, obj_id, prop, heads)
@@ -252,12 +270,12 @@ impl Transaction {
         })
     }
 
-    fn put_object(&mut self, obj_id: PyObjId, prop: PyProp, objtype: PyObjType) -> PyResult<PyObjId> {
+    fn put_object(&mut self, obj_id: PyObjId, prop: PyProp, objtype: &PyObjType) -> PyResult<PyObjId> {
         let mut inner = self.inner.write().map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
         let Some(tx) = inner.tx.as_mut() else {
             return Err(PyException::new_err("transaction no longer active"));
         };
-        tx.put_object(obj_id.0, prop.0, objtype.0).map_err(|e| {
+        tx.put_object(obj_id.0, prop.0, objtype.into()).map_err(|e| {
             PyException::new_err(format!("error putting: {}", e))
         }).map(PyObjId)
     }
@@ -272,12 +290,12 @@ impl Transaction {
         })
     }
 
-    fn insert_object(&mut self, obj_id: PyObjId, index: usize, objtype: PyObjType) -> PyResult<PyObjId> {
+    fn insert_object(&mut self, obj_id: PyObjId, index: usize, objtype: &PyObjType) -> PyResult<PyObjId> {
         let mut inner = self.inner.write().map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
         let Some(tx) = inner.tx.as_mut() else {
             return Err(PyException::new_err("transaction no longer active"));
         };
-        tx.insert_object(obj_id.0, index, objtype.0).map_err(|e| {
+        tx.insert_object(obj_id.0, index, objtype.into()).map_err(|e| {
             PyException::new_err(format!("error putting: {}", e))
         }).map(PyObjId)
     }
@@ -327,6 +345,7 @@ fn import_scalar(value: &PyAny) -> Result<ScalarValue, PyErr> {
 #[pymodule]
 fn automerge(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Document>()?;
+    m.add_class::<PyObjType>()?;
     m.add("ROOT", PyObjId(am::ROOT))?;
     Ok(())
 }
@@ -384,28 +403,31 @@ impl IntoPy<PyObject> for PyChangeHash {
 }
 
 #[derive(Debug)]
-pub struct PyObjType(ObjType);
+#[pyclass(name = "ObjType")]
+pub enum PyObjType {
+    Map,
+    List,
+    Text,
+}
 
-impl<'a> FromPyObject<'a> for PyObjType {
-    fn extract(prop: &'a PyAny) -> PyResult<Self> {
-        Ok(PyObjType(match prop.extract::<&str>() {
-            Ok("map") => ObjType::Map,
-            Ok("list") => ObjType::List,
-            Ok("text") => ObjType::Text,
-            Ok(_) => todo!(),
-            Err(_) => todo!(),
-        }))
+impl PyObjType {
+    fn from_objtype(objtype: ObjType) -> PyObjType {
+        match objtype {
+            ObjType::Map => PyObjType::Map,
+            ObjType::Table => todo!(),
+            ObjType::List => PyObjType::List,
+            ObjType::Text => PyObjType::Text,
+        }
     }
 }
 
-impl IntoPy<PyObject> for PyObjType {
-    fn into_py(self, py: Python<'_>) -> PyObject {
-        match self.0 {
-            ObjType::Map => "map",
-            ObjType::Table => "table",
-            ObjType::List => "list",
-            ObjType::Text => "text",
-        }.into_py(py)
+impl Into<ObjType> for &PyObjType {
+    fn into(self) -> ObjType {
+        match self {
+            PyObjType::Map => ObjType::Map,
+            PyObjType::List => ObjType::List,
+            PyObjType::Text => ObjType::Text,
+        }
     }
 }
 
@@ -434,7 +456,7 @@ pub struct PyValue<'a>(am::Value<'a>);
 impl<'a> IntoPy<PyObject> for PyValue<'a> {
     fn into_py(self, py: Python<'_>) -> PyObject {
         match self.0 {
-            am::Value::Object(objtype) => PyObjType(objtype).into_py(py),
+            am::Value::Object(objtype) => PyObjType::from_objtype(objtype).into_py(py),
             am::Value::Scalar(s) => PyScalarValue(&s).into_py(py),
         }
     }
