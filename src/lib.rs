@@ -8,6 +8,10 @@ struct Inner {
     tx: Option<am::transaction::Transaction<'static>>
 }
 
+fn get_heads(heads: Option<Vec<PyChangeHash>>) -> Option<Vec<ChangeHash>> {
+    heads.map(|heads| heads.iter().map(|h| h.0).collect())
+}
+
 impl Inner {
     fn new(doc: am::Automerge) -> Self {
         Self {
@@ -19,19 +23,13 @@ impl Inner {
     // Read methods go on Inner as they're callable from either Transaction or Document.
     fn get(&self, py: Python, obj_id: PyObjId, prop: PyProp, heads: Option<Vec<PyChangeHash>>) -> PyResult<Option<(PyObject, PyObjId)>> {
         let res = if let Some(tx) = self.tx.as_ref() {
-            match heads {
-                Some(heads) => {
-                    let heads: Vec<ChangeHash> = heads.iter().map(|h| h.0).collect();
-                    tx.get_at(obj_id.0, prop.0, &heads)
-                },
+            match get_heads(heads) {
+                Some(heads) => tx.get_at(obj_id.0, prop.0, &heads),
                 None => tx.get(obj_id.0, prop.0),
             }
         } else {
-            match heads {
-                Some(heads) => {
-                    let heads: Vec<ChangeHash> = heads.iter().map(|h| h.0).collect();
-                    self.doc.get_at(obj_id.0, prop.0, &heads)
-                },
+            match get_heads(heads) {
+                Some(heads) => self.doc.get_at(obj_id.0, prop.0, &heads),
                 None => self.doc.get(obj_id.0, prop.0),
             }
         }.map_err(|e| PyException::new_err(e.to_string()))?;
@@ -40,19 +38,13 @@ impl Inner {
 
     fn keys(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<String>> {
         let res = if let Some(tx) = self.tx.as_ref() {
-            match heads {
-                Some(heads) => {
-                    let heads: Vec<ChangeHash> = heads.iter().map(|h| h.0).collect();
-                    tx.keys_at(obj_id.0, &heads)
-                },
+            match get_heads(heads) {
+                Some(heads) => tx.keys_at(obj_id.0, &heads),
                 None => tx.keys(obj_id.0),
             }
         } else {
-            match heads {
-                Some(heads) => {
-                    let heads: Vec<ChangeHash> = heads.iter().map(|h| h.0).collect();
-                    self.doc.keys_at(obj_id.0, &heads)
-                },
+            match get_heads(heads) {
+                Some(heads) => self.doc.keys_at(obj_id.0, &heads),
                 None => self.doc.keys(obj_id.0),
             }
         };
