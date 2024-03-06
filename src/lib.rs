@@ -1,6 +1,6 @@
 use std::{mem::transmute, sync::{Arc, RwLock}};
 
-use pyo3::{exceptions::{PyException, PyValueError}, prelude::*, types::PyBytes};
+use pyo3::{exceptions::PyException, prelude::*, types::PyBytes};
 use ::automerge::{self as am, transaction::Transactable, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
 
 struct Inner {
@@ -9,6 +9,14 @@ struct Inner {
 }
 
 impl Inner {
+    fn new(doc: am::Automerge) -> Self {
+        Self {
+            doc,
+            tx: None
+        }
+    }
+
+    // Read methods go on Inner as they're callable from either Transaction or Document.
     fn get(&self, py: Python, obj_id: PyObjId, prop: PyProp, heads: Option<Vec<PyChangeHash>>) -> PyResult<Option<(PyObject, PyObjId)>> {
         let res = if let Some(tx) = self.tx.as_ref() {
             match heads {
@@ -50,6 +58,14 @@ impl Inner {
         };
         Ok(res.collect())
     }
+    
+    fn get_heads(&self) -> Vec<PyChangeHash> {
+        if let Some(tx) = self.tx.as_ref() {
+            tx.get_heads()
+        } else {
+            self.doc.get_heads()
+        }.iter().map(|c| PyChangeHash(*c)).collect()
+    }
 }
 
 #[pyclass]
@@ -62,10 +78,7 @@ impl Document {
     #[new]
     fn new() -> Self {
         Document {
-            inner: Arc::new(RwLock::new(Inner {
-                doc: am::Automerge::new(),
-                tx: None
-            }))
+            inner: Arc::new(RwLock::new(Inner::new(am::Automerge::new())))
         }
     }
 
@@ -92,6 +105,19 @@ impl Document {
         }
 
         Ok(PyBytes::new(py, &inner.doc.save()))
+    }
+    
+    #[staticmethod]
+    fn load(bytes: &[u8]) -> PyResult<Self> {
+        let doc = am::Automerge::load(bytes).map_err(|e| PyException::new_err(e.to_string()))?;
+        Ok(Self {
+            inner: Arc::new(RwLock::new(Inner::new(doc)))
+        })
+    }
+    
+    fn get_heads(&self) -> PyResult<Vec<PyChangeHash>> {
+        let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
+        Ok(inner.get_heads())
     }
 
     fn get(&self, py: Python, obj_id: PyObjId, prop: PyProp, heads: Option<Vec<PyChangeHash>>) -> PyResult<Option<(PyObject, PyObjId)>> {
@@ -129,6 +155,11 @@ impl Transaction {
             }
         }
         Ok(())
+    }
+
+    fn get_heads(&self) -> PyResult<Vec<PyChangeHash>> {
+        let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
+        Ok(inner.get_heads())
     }
 
     fn get(&self, py: Python, obj_id: PyObjId, prop: PyProp, heads: Option<Vec<PyChangeHash>>) -> PyResult<Option<(PyObject, PyObjId)>> {
