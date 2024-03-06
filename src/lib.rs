@@ -58,6 +58,20 @@ impl Inner {
             self.doc.get_heads()
         }.iter().map(|c| PyChangeHash(*c)).collect()
     }
+
+    fn length(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> usize {
+        if let Some(tx) = self.tx.as_ref() {
+            match get_heads(heads) {
+                Some(heads) => tx.length_at(obj_id.0, &heads),
+                None => tx.length(obj_id.0)
+            }
+        } else {
+            match get_heads(heads) {
+                Some(heads) => self.doc.length_at(obj_id.0, &heads),
+                None => self.doc.length(obj_id.0)
+            }
+        }
+    }
 }
 
 #[pyclass]
@@ -120,6 +134,11 @@ impl Document {
     fn keys(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<String>> {
         let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
         inner.keys(obj_id, heads)
+    }
+    
+    fn length(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<usize> {
+        let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
+        Ok(inner.length(obj_id, heads))
     }
 }
 
