@@ -3,10 +3,10 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use am::sync::SyncDoc;
-use automerge::{
+use ::automerge::{
     self as am, transaction::Transactable, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue,
 };
+use am::sync::SyncDoc;
 use pyo3::{exceptions::PyException, prelude::*, types::PyBytes};
 
 struct Inner {
