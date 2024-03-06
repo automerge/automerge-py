@@ -1,5 +1,6 @@
 use std::{mem::transmute, sync::{Arc, RwLock}};
 
+use am::sync::SyncDoc;
 use pyo3::{exceptions::PyException, prelude::*, types::PyBytes};
 use ::automerge::{self as am, transaction::Transactable, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue};
 
@@ -154,7 +155,7 @@ impl Document {
 
         Ok(PyBytes::new(py, &inner.doc.save()))
     }
-    
+
     #[staticmethod]
     fn load(bytes: &[u8]) -> PyResult<Self> {
         let doc = am::Automerge::load(bytes).map_err(|e| PyException::new_err(e.to_string()))?;
@@ -163,6 +164,22 @@ impl Document {
         })
     }
     
+    fn generate_sync_message(&self, state: &mut PySyncState) -> PyResult<Option<PyMessage>> {
+        let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
+        if inner.tx.as_ref().is_some() {
+            return Err(PyException::new_err("cannot sync with an active transaction"))
+        }
+        Ok(inner.doc.generate_sync_message(&mut state.0).map(PyMessage))
+    }
+    
+    fn receive_sync_message(&mut self, state: &mut PySyncState, message: &mut PyMessage) -> PyResult<()> {
+        let mut inner = self.inner.write().map_err(|e| PyException::new_err(e.to_string()))?;
+        if inner.tx.as_ref().is_some() {
+            return Err(PyException::new_err("cannot sync with an active transaction"))
+        }
+        inner.doc.receive_sync_message(&mut state.0, message.0.clone()).map_err(|e| PyException::new_err(e.to_string()))
+    }
+
     fn get_heads(&self) -> PyResult<Vec<PyChangeHash>> {
         let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
         Ok(inner.get_heads())
@@ -341,11 +358,39 @@ fn import_scalar(value: &PyAny) -> Result<ScalarValue, PyErr> {
     }
 }
 
+#[pyclass(name="SyncState")]
+struct PySyncState(am::sync::State);
+
+#[pymethods]
+impl PySyncState {
+    #[new]
+    pub fn new() -> PySyncState {
+        PySyncState(am::sync::State::new())
+    }
+}
+
+#[pyclass(name="Message")]
+struct PyMessage(am::sync::Message);
+
+#[pymethods]
+impl PyMessage {
+    pub fn encode<'py>(&self, py: Python<'py>) -> &'py PyBytes {
+        PyBytes::new(py, &self.0.clone().encode())
+    }
+    
+    #[staticmethod]
+    pub fn decode(bytes: &[u8]) -> PyResult<PyMessage> {
+        Ok(PyMessage(am::sync::Message::decode(bytes).map_err(|e| PyException::new_err(e.to_string()))?))
+    }
+}
+
 /// A Python module implemented in Rust.
 #[pymodule]
 fn automerge(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Document>()?;
     m.add_class::<PyObjType>()?;
+    m.add_class::<PySyncState>()?;
+    m.add_class::<PyMessage>()?;
     m.add("ROOT", PyObjId(am::ROOT))?;
     Ok(())
 }
