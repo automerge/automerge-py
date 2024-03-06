@@ -7,7 +7,11 @@ use ::automerge::{
     self as am, transaction::Transactable, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue,
 };
 use am::sync::SyncDoc;
-use pyo3::{exceptions::PyException, prelude::*, types::PyBytes};
+use pyo3::{
+    exceptions::PyException,
+    prelude::*,
+    types::{PyBytes, PyDateTime},
+};
 
 struct Inner {
     doc: am::Automerge,
@@ -634,7 +638,9 @@ impl<'a> IntoPy<PyObject> for PyScalarValue<'a> {
             ScalarValue::Uint(v) => v.into_py(py),
             ScalarValue::F64(v) => v.into_py(py),
             ScalarValue::Counter(v) => todo!(),
-            ScalarValue::Timestamp(v) => v.into_py(py),
+            ScalarValue::Timestamp(v) => PyDateTime::from_timestamp(py, *v as f64, None)
+                .unwrap()
+                .into_py(py),
             ScalarValue::Boolean(v) => v.into_py(py),
             ScalarValue::Unknown { type_code, bytes } => todo!(),
             ScalarValue::Null => Python::None(py),
