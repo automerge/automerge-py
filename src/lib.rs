@@ -402,7 +402,13 @@ impl Transaction {
         inner.marks(py, obj_id, heads)
     }
 
-    fn put(&mut self, obj_id: PyObjId, prop: PyProp, value: &PyAny) -> PyResult<()> {
+    fn put(
+        &mut self,
+        obj_id: PyObjId,
+        prop: PyProp,
+        value_type: &PyScalarType,
+        value: &PyAny,
+    ) -> PyResult<()> {
         let mut inner = self
             .inner
             .write()
@@ -410,7 +416,7 @@ impl Transaction {
         let Some(tx) = inner.tx.as_mut() else {
             return Err(PyException::new_err("transaction no longer active"));
         };
-        tx.put(obj_id.0, prop.0, import_scalar(value)?)
+        tx.put(obj_id.0, prop.0, import_scalar(value, value_type)?)
             .map_err(|e| PyException::new_err(format!("error putting: {}", e)))
     }
 
@@ -432,7 +438,13 @@ impl Transaction {
             .map(PyObjId)
     }
 
-    fn insert(&mut self, obj_id: PyObjId, index: usize, value: &PyAny) -> PyResult<()> {
+    fn insert(
+        &mut self,
+        obj_id: PyObjId,
+        index: usize,
+        value_type: &PyScalarType,
+        value: &PyAny,
+    ) -> PyResult<()> {
         let mut inner = self
             .inner
             .write()
@@ -440,7 +452,7 @@ impl Transaction {
         let Some(tx) = inner.tx.as_mut() else {
             return Err(PyException::new_err("transaction no longer active"));
         };
-        tx.insert(obj_id.0, index, import_scalar(value)?)
+        tx.insert(obj_id.0, index, import_scalar(value, value_type)?)
             .map_err(|e| PyException::new_err(format!("error putting: {}", e)))
     }
 
@@ -487,24 +499,25 @@ impl Transaction {
     }
 }
 
-fn import_scalar(value: &PyAny) -> Result<ScalarValue, PyErr> {
-    if value.is_none() {
-        Ok(ScalarValue::Null)
-    } else if let Ok(b) = value.extract::<bool>() {
-        Ok(ScalarValue::Boolean(b))
-    } else if let Ok(s) = value.extract::<String>() {
-        Ok(ScalarValue::Str(s.into()))
-    } else if let Ok(n) = value.extract::<f64>() {
-        if (n.round() - n).abs() < f64::EPSILON {
-            Ok(ScalarValue::Int(n as i64))
-        } else {
-            Ok(ScalarValue::F64(n))
+fn datetime_to_timestamp(datetime: &PyDateTime) -> PyResult<i64> {
+    Ok((datetime.call_method0("timestamp")?.extract::<f64>()? * 1000.0).round() as i64)
+}
+
+fn import_scalar(value: &PyAny, scalar_type: &PyScalarType) -> Result<ScalarValue, PyErr> {
+    Ok(match scalar_type {
+        PyScalarType::Bytes => ScalarValue::Bytes(value.extract::<&[u8]>()?.to_owned()),
+        PyScalarType::Str => ScalarValue::Str(value.extract::<String>()?.into()),
+        PyScalarType::Int => ScalarValue::Int(value.extract::<i64>()?),
+        PyScalarType::Uint => ScalarValue::Uint(value.extract::<u64>()?),
+        PyScalarType::F64 => ScalarValue::F64(value.extract::<f64>()?),
+        PyScalarType::Counter => todo!(),
+        PyScalarType::Timestamp => {
+            ScalarValue::Timestamp(datetime_to_timestamp(value.downcast::<PyDateTime>()?)?)
         }
-    } else if let Ok(o) = &value.extract::<&[u8]>() {
-        Ok(ScalarValue::Bytes(o.to_vec()))
-    } else {
-        Err(PyException::new_err("unknown value type"))
-    }
+        PyScalarType::Boolean => ScalarValue::Boolean(value.extract::<bool>()?),
+        PyScalarType::Unknown => todo!(),
+        PyScalarType::Null => ScalarValue::Null,
+    })
 }
 
 #[pyclass(name = "SyncState")]
@@ -542,6 +555,7 @@ fn automerge(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyObjType>()?;
     m.add_class::<PySyncState>()?;
     m.add_class::<PyMessage>()?;
+    m.add_class::<PyScalarType>()?;
     m.add("ROOT", PyObjId(am::ROOT))?;
     Ok(())
 }
@@ -628,23 +642,42 @@ impl Into<ObjType> for &PyObjType {
 }
 
 #[derive(Debug)]
+#[pyclass(name = "ScalarType")]
+pub enum PyScalarType {
+    Bytes,
+    Str,
+    Int,
+    Uint,
+    F64,
+    Counter,
+    Timestamp,
+    Boolean,
+    Unknown,
+    Null,
+}
+
+#[derive(Debug)]
 pub struct PyScalarValue<'a>(&'a am::ScalarValue);
 impl<'a> IntoPy<PyObject> for PyScalarValue<'a> {
     fn into_py(self, py: Python<'_>) -> PyObject {
         match self.0 {
-            ScalarValue::Bytes(v) => v.clone().into_py(py),
-            ScalarValue::Str(v) => v.to_owned().into_py(py),
-            ScalarValue::Int(v) => v.into_py(py),
-            ScalarValue::Uint(v) => v.into_py(py),
-            ScalarValue::F64(v) => v.into_py(py),
+            ScalarValue::Bytes(v) => (PyScalarType::Bytes, v.clone().into_py(py)),
+            ScalarValue::Str(v) => (PyScalarType::Str, v.to_owned().into_py(py)),
+            ScalarValue::Int(v) => (PyScalarType::Int, v.into_py(py)),
+            ScalarValue::Uint(v) => (PyScalarType::Uint, v.into_py(py)),
+            ScalarValue::F64(v) => (PyScalarType::F64, v.into_py(py)),
             ScalarValue::Counter(v) => todo!(),
-            ScalarValue::Timestamp(v) => PyDateTime::from_timestamp(py, *v as f64, None)
-                .unwrap()
-                .into_py(py),
-            ScalarValue::Boolean(v) => v.into_py(py),
+            ScalarValue::Timestamp(v) => (
+                PyScalarType::Timestamp,
+                PyDateTime::from_timestamp(py, (*v as f64) / 1000.0, None)
+                    .unwrap()
+                    .into_py(py),
+            ),
+            ScalarValue::Boolean(v) => (PyScalarType::Boolean, v.into_py(py)),
             ScalarValue::Unknown { type_code, bytes } => todo!(),
-            ScalarValue::Null => Python::None(py),
+            ScalarValue::Null => (PyScalarType::Null, Python::None(py)),
         }
+        .into_py(py)
     }
 }
 
