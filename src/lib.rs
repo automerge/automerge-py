@@ -72,6 +72,20 @@ impl Inner {
             }
         }
     }
+
+    fn text(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<String> {
+        if let Some(tx) = self.tx.as_ref() {
+            match get_heads(heads) {
+                Some(heads) => tx.text_at(obj_id.0, &heads),
+                None => tx.text(obj_id.0)
+            }
+        } else {
+            match get_heads(heads) {
+                Some(heads) => self.doc.text_at(obj_id.0, &heads),
+                None => self.doc.text(obj_id.0)
+            }
+        }.map_err(|e| PyException::new_err(e.to_string()))
+    }
 }
 
 #[pyclass]
@@ -140,6 +154,11 @@ impl Document {
         let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
         Ok(inner.length(obj_id, heads))
     }
+    
+    fn text(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<String> {
+        let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.text(obj_id, heads)
+    }
 }
 
 #[derive(Clone)]
@@ -186,6 +205,11 @@ impl Transaction {
     fn length(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<usize> {
         let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
         Ok(inner.length(obj_id, heads))
+    }
+
+    fn text(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<String> {
+        let inner = self.inner.read().map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.text(obj_id, heads)
     }
     
     fn put(&mut self, obj_id: PyObjId, prop: PyProp, value: &PyAny) -> PyResult<()> {
