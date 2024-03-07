@@ -43,3 +43,16 @@ def test_values():
     assert [v[0] for v in values] == [(ScalarType.Boolean, True), (ScalarType.Str, "world")]
     values = doc.values(list_id)
     assert [v[0] for v in values] == [(ScalarType.Str, "one"), (ScalarType.Boolean, True)]
+
+def test_diff():
+    doc = Document()
+
+    with doc.transaction() as tx:
+        map_id = tx.put_object(ROOT, "map", ObjType.Map)
+        tx.put(map_id, "hello", ScalarType.Str, "world")
+        list_id = tx.put_object(ROOT, "list", ObjType.List)
+        tx.insert(list_id, 0, ScalarType.Boolean, True)
+
+    patch = doc.diff([], doc.get_heads())
+    assert len(patch) == 4
+

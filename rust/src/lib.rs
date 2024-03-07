@@ -326,6 +326,34 @@ impl Document {
             .map_err(|e| PyException::new_err(e.to_string()))
     }
 
+    fn diff(
+        &self,
+        before_heads: Vec<PyChangeHash>,
+        after_heads: Vec<PyChangeHash>,
+    ) -> PyResult<Vec<PyPatch>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        if inner.tx.as_ref().is_some() {
+            return Err(PyException::new_err(
+                "cannot diff with an active transaction",
+            ));
+        }
+        let before_heads: Vec<ChangeHash> = before_heads.iter().map(|h| h.0).collect();
+        let after_heads: Vec<ChangeHash> = after_heads.iter().map(|h| h.0).collect();
+        Ok(inner
+            .doc
+            .diff(
+                &before_heads,
+                &after_heads,
+                am::patches::TextRepresentation::Array,
+            )
+            .iter()
+            .map(|p| PyPatch(p.clone()))
+            .collect())
+    }
+
     fn get_changes(&self, have_deps: Vec<PyChangeHash>) -> PyResult<Vec<PyChange>> {
         let inner = self
             .inner
@@ -831,12 +859,6 @@ impl<'a> FromPyObject<'a> for PyScalarValue {
     }
 }
 
-impl Into<ScalarValue> for PyScalarValue {
-    fn into(self) -> ScalarValue {
-        todo!()
-    }
-}
-
 #[derive(Debug)]
 pub struct PyValue<'a>(am::Value<'a>);
 
@@ -891,7 +913,7 @@ struct PyChange(am::Change);
 #[pymethods]
 impl PyChange {
     fn __repr__(&self) -> String {
-        format!("{:?}", self)
+        format!("{:?}", self.0)
     }
 
     fn actor_id(&self) -> &[u8] {
@@ -948,5 +970,16 @@ impl PyChange {
 
     fn extra_bytes(&self) -> &[u8] {
         self.0.extra_bytes()
+    }
+}
+
+#[pyclass(name = "Patch")]
+#[derive(Debug)]
+struct PyPatch(am::Patch);
+
+#[pymethods]
+impl PyPatch {
+    fn __repr__(&self) -> String {
+        format!("{:?}", self.0)
     }
 }
