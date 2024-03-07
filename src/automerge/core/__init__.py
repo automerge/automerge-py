@@ -1,4 +1,5 @@
-from ._automerge import *
+from .. import _automerge
+from .._automerge import *
 
 def extract(doc, obj_id=ROOT):
     match doc.object_type(obj_id):

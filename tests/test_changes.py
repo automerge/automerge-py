@@ -1,5 +1,5 @@
 import datetime
-from automerge import Document, ROOT, ScalarType
+from automerge.core import Document, ROOT, ScalarType
 
 def test_get_changes():
     doc = Document()

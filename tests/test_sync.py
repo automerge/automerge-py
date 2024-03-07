@@ -1,4 +1,4 @@
-from automerge import Document, ROOT, SyncState, Message, ScalarType, extract
+from automerge.core import Document, ROOT, SyncState, Message, ScalarType, extract
 
 def test_sync():
     doc1 = Document()

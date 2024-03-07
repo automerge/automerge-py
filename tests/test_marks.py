@@ -1,4 +1,4 @@
-from automerge import Document, ROOT, ObjType, ScalarType, ExpandMark, extract
+from automerge.core import Document, ROOT, ObjType, ScalarType, ExpandMark, extract
 
 def test_marks():
     doc = Document()

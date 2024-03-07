@@ -1,4 +1,4 @@
-from automerge import Document, ROOT, ObjType, ScalarType, extract
+from automerge.core import Document, ROOT, ObjType, ScalarType, extract
 
 def test_readme():
     doc = Document()
