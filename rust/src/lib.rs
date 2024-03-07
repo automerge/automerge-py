@@ -550,7 +550,7 @@ impl PyMessage {
 
 /// A Python module implemented in Rust.
 #[pymodule]
-fn automerge(_py: Python, m: &PyModule) -> PyResult<()> {
+fn _automerge(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<Document>()?;
     m.add_class::<PyObjType>()?;
     m.add_class::<PySyncState>()?;

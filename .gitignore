@@ -1,2 +1,4 @@
 env/
 target/
+__pycache__/
+*.so
