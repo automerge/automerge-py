@@ -9,6 +9,7 @@ use ::automerge::{
 use am::{
     marks::{ExpandMark, Mark},
     sync::SyncDoc,
+    ActorId,
 };
 use pyo3::{
     exceptions::PyException,
@@ -170,9 +171,13 @@ struct Document {
 #[pymethods]
 impl Document {
     #[new]
-    fn new() -> Self {
+    fn new(actor_id: Option<&[u8]>) -> Self {
+        let mut doc = am::Automerge::new();
+        if let Some(id) = actor_id {
+            doc.set_actor(ActorId::from(id));
+        }
         Document {
-            inner: Arc::new(RwLock::new(Inner::new(am::Automerge::new()))),
+            inner: Arc::new(RwLock::new(Inner::new(doc))),
         }
     }
 
