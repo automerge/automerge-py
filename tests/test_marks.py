@@ -14,6 +14,6 @@ def test_marks():
     assert mark.start == 0
     assert mark.end == 1
     assert mark.value == (ScalarType.Boolean, True)
-    
+
 if __name__ == "__main__":
     test_marks()

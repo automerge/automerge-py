@@ -11,3 +11,35 @@ def test_basic():
         tx.insert(text, 1, ScalarType.Str, "i")
 
     assert extract(doc) == {'hello': {'test': 'world'}, 'text': 'hi'}
+
+def test_keys():
+    doc = Document()
+
+    with doc.transaction() as tx:
+        map_id = tx.put_object(ROOT, "map", ObjType.Map)
+        tx.put(map_id, "foo", ScalarType.Boolean, True)
+        tx.put(map_id, "hello", ScalarType.Str, "world")
+        list_id = tx.put_object(ROOT, "list", ObjType.List)
+        tx.insert(list_id, 0, ScalarType.Str, "one")
+        tx.insert(list_id, 1, ScalarType.Boolean, True)
+
+    assert doc.keys(ROOT) == ['list', 'map']
+    assert doc.keys(map_id) == ['foo', 'hello']
+    list_keys = doc.keys(list_id)
+    assert len(list_keys) == 2
+
+def test_values():
+    doc = Document()
+
+    with doc.transaction() as tx:
+        map_id = tx.put_object(ROOT, "map", ObjType.Map)
+        tx.put(map_id, "foo", ScalarType.Boolean, True)
+        tx.put(map_id, "hello", ScalarType.Str, "world")
+        list_id = tx.put_object(ROOT, "list", ObjType.List)
+        tx.insert(list_id, 0, ScalarType.Str, "one")
+        tx.insert(list_id, 1, ScalarType.Boolean, True)
+
+    values = doc.values(map_id)
+    assert [v[0] for v in values] == [(ScalarType.Boolean, True), (ScalarType.Str, "world")]
+    values = doc.values(list_id)
+    assert [v[0] for v in values] == [(ScalarType.Str, "one"), (ScalarType.Boolean, True)]

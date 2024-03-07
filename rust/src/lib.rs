@@ -41,13 +41,12 @@ impl Inner {
         .map(PyObjType::from_objtype)
     }
 
-    fn get(
+    fn get<'py>(
         &self,
-        py: Python,
         obj_id: PyObjId,
         prop: PyProp,
         heads: Option<Vec<PyChangeHash>>,
-    ) -> PyResult<Option<(PyObject, PyObjId)>> {
+    ) -> PyResult<Option<(PyValue<'py>, PyObjId)>> {
         let res = if let Some(tx) = self.tx.as_ref() {
             match get_heads(heads) {
                 Some(heads) => tx.get_at(obj_id.0, prop.0, &heads),
@@ -60,7 +59,7 @@ impl Inner {
             }
         }
         .map_err(|e| PyException::new_err(e.to_string()))?;
-        Ok(res.map(|(v, id)| (PyValue(v).into_py(py), PyObjId(id))))
+        Ok(res.map(|(v, id)| (PyValue(v.into_owned()), PyObjId(id))))
     }
 
     fn keys(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<String>> {
@@ -75,6 +74,26 @@ impl Inner {
                 None => self.doc.keys(obj_id.0),
             }
         };
+        Ok(res.collect())
+    }
+
+    fn values<'py>(
+        &self,
+        obj_id: PyObjId,
+        heads: Option<Vec<PyChangeHash>>,
+    ) -> PyResult<Vec<(PyValue<'py>, PyObjId)>> {
+        let res = if let Some(tx) = self.tx.as_ref() {
+            match get_heads(heads) {
+                Some(heads) => tx.values_at(obj_id.0, &heads),
+                None => tx.values(obj_id.0),
+            }
+        } else {
+            match get_heads(heads) {
+                Some(heads) => self.doc.values_at(obj_id.0, &heads),
+                None => self.doc.values(obj_id.0),
+            }
+        }
+        .map(|(v, id)| (PyValue(v.into_owned()), PyObjId(id)));
         Ok(res.collect())
     }
 
@@ -295,16 +314,15 @@ impl Document {
 
     fn get(
         &self,
-        py: Python,
         obj_id: PyObjId,
         prop: PyProp,
         heads: Option<Vec<PyChangeHash>>,
-    ) -> PyResult<Option<(PyObject, PyObjId)>> {
+    ) -> PyResult<Option<(PyValue, PyObjId)>> {
         let inner = self
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        inner.get(py, obj_id, prop, heads)
+        inner.get(obj_id, prop, heads)
     }
 
     fn keys(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<String>> {
@@ -313,6 +331,18 @@ impl Document {
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
         inner.keys(obj_id, heads)
+    }
+
+    fn values(
+        &self,
+        obj_id: PyObjId,
+        heads: Option<Vec<PyChangeHash>>,
+    ) -> PyResult<Vec<(PyValue, PyObjId)>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.values(obj_id, heads)
     }
 
     fn length(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<usize> {
@@ -392,16 +422,15 @@ impl Transaction {
 
     fn get(
         &self,
-        py: Python,
         obj_id: PyObjId,
         prop: PyProp,
         heads: Option<Vec<PyChangeHash>>,
-    ) -> PyResult<Option<(PyObject, PyObjId)>> {
+    ) -> PyResult<Option<(PyValue, PyObjId)>> {
         let inner = self
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        inner.get(py, obj_id, prop, heads)
+        inner.get(obj_id, prop, heads)
     }
 
     fn keys(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<String>> {
