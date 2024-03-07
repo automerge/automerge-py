@@ -6,7 +6,10 @@ use std::{
 use ::automerge::{
     self as am, transaction::Transactable, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue,
 };
-use am::sync::SyncDoc;
+use am::{
+    marks::{ExpandMark, Mark},
+    sync::SyncDoc,
+};
 use pyo3::{
     exceptions::PyException,
     prelude::*,
@@ -139,7 +142,7 @@ impl Inner {
                 start: m.start,
                 end: m.end,
                 name: m.name().to_owned(),
-                value: PyScalarValue(&m.value()).into_py(py),
+                value: PyScalarValue(m.value().clone()),
             })
             .collect())
     }
@@ -543,6 +546,41 @@ impl Transaction {
         tx.delete(obj_id.0, prop.0)
             .map_err(|e| PyException::new_err(format!("error putting: {}", e)))
     }
+
+    fn mark(&mut self, obj_id: PyObjId, mark: &PyMark, expand: &PyExpandMark) -> PyResult<()> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
+        let Some(tx) = inner.tx.as_mut() else {
+            return Err(PyException::new_err("transaction no longer active"));
+        };
+        tx.mark(
+            obj_id.0,
+            Mark::new(mark.name.clone(), mark.value.clone(), mark.start, mark.end),
+            expand.into(),
+        )
+        .map_err(|e| PyException::new_err(e.to_string()))
+    }
+
+    fn unmark(
+        &mut self,
+        obj_id: PyObjId,
+        key: &str,
+        start: usize,
+        end: usize,
+        expand: &PyExpandMark,
+    ) -> PyResult<()> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
+        let Some(tx) = inner.tx.as_mut() else {
+            return Err(PyException::new_err("transaction no longer active"));
+        };
+        tx.unmark(obj_id.0, key, start, end, expand.into())
+            .map_err(|e| PyException::new_err(e.to_string()))
+    }
 }
 
 fn datetime_to_timestamp(datetime: &PyDateTime) -> PyResult<i64> {
@@ -687,7 +725,7 @@ impl Into<ObjType> for &PyObjType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[pyclass(name = "ScalarType")]
 pub enum PyScalarType {
     Bytes,
@@ -702,20 +740,20 @@ pub enum PyScalarType {
     Null,
 }
 
-#[derive(Debug)]
-pub struct PyScalarValue<'a>(&'a am::ScalarValue);
-impl<'a> IntoPy<PyObject> for PyScalarValue<'a> {
+#[derive(Debug, Clone)]
+pub struct PyScalarValue(am::ScalarValue);
+impl IntoPy<PyObject> for PyScalarValue {
     fn into_py(self, py: Python<'_>) -> PyObject {
         match self.0 {
-            ScalarValue::Bytes(v) => (PyScalarType::Bytes, v.clone().into_py(py)),
-            ScalarValue::Str(v) => (PyScalarType::Str, v.to_owned().into_py(py)),
+            ScalarValue::Bytes(v) => (PyScalarType::Bytes, v.into_py(py)),
+            ScalarValue::Str(v) => (PyScalarType::Str, v.into_py(py)),
             ScalarValue::Int(v) => (PyScalarType::Int, v.into_py(py)),
             ScalarValue::Uint(v) => (PyScalarType::Uint, v.into_py(py)),
             ScalarValue::F64(v) => (PyScalarType::F64, v.into_py(py)),
             ScalarValue::Counter(v) => todo!(),
             ScalarValue::Timestamp(v) => (
                 PyScalarType::Timestamp,
-                PyDateTime::from_timestamp(py, (*v as f64) / 1000.0, None)
+                PyDateTime::from_timestamp(py, (v as f64) / 1000.0, None)
                     .unwrap()
                     .into_py(py),
             ),
@@ -727,6 +765,19 @@ impl<'a> IntoPy<PyObject> for PyScalarValue<'a> {
     }
 }
 
+impl<'a> FromPyObject<'a> for PyScalarValue {
+    fn extract(v: &'a PyAny) -> PyResult<Self> {
+        v.extract::<(PyScalarType, &PyAny)>()
+            .and_then(|(t, v)| import_scalar(v, &t).map(|v| PyScalarValue(v)))
+    }
+}
+
+impl Into<ScalarValue> for PyScalarValue {
+    fn into(self) -> ScalarValue {
+        todo!()
+    }
+}
+
 #[derive(Debug)]
 pub struct PyValue<'a>(am::Value<'a>);
 
@@ -734,7 +785,7 @@ impl<'a> IntoPy<PyObject> for PyValue<'a> {
     fn into_py(self, py: Python<'_>) -> PyObject {
         match self.0 {
             am::Value::Object(objtype) => PyObjType::from_objtype(objtype).into_py(py),
-            am::Value::Scalar(s) => PyScalarValue(&s).into_py(py),
+            am::Value::Scalar(s) => PyScalarValue(s.as_ref().clone()).into_py(py),
         }
     }
 }
@@ -744,5 +795,24 @@ struct PyMark {
     start: usize,
     end: usize,
     name: String,
-    value: PyObject,
+    value: PyScalarValue,
+}
+
+#[pyclass]
+enum PyExpandMark {
+    Before,
+    After,
+    Both,
+    None,
+}
+
+impl Into<ExpandMark> for &PyExpandMark {
+    fn into(self) -> ExpandMark {
+        match self {
+            PyExpandMark::Before => ExpandMark::Before,
+            PyExpandMark::After => ExpandMark::After,
+            PyExpandMark::Both => ExpandMark::Both,
+            PyExpandMark::None => ExpandMark::None,
+        }
+    }
 }
