@@ -249,6 +249,52 @@ impl Document {
         inner.object_type(obj_id)
     }
 
+    fn fork(&self, heads: Option<Vec<PyChangeHash>>) -> PyResult<Document> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        if inner.tx.as_ref().is_some() {
+            return Err(PyException::new_err(
+                "cannot fork with an active transaction",
+            ));
+        }
+        let new_doc = match get_heads(heads) {
+            Some(heads) => inner.doc.fork_at(&heads),
+            None => Ok(inner.doc.fork()),
+        }
+        .map_err(|e| PyException::new_err(e.to_string()))?;
+        Ok(Document {
+            inner: Arc::new(RwLock::new(Inner::new(new_doc))),
+        })
+    }
+
+    fn merge(&mut self, other: &Document) -> PyResult<Vec<PyChangeHash>> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        if inner.tx.as_ref().is_some() {
+            return Err(PyException::new_err(
+                "cannot merge with an active transaction",
+            ));
+        }
+        let mut other_inner = other
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        if other_inner.tx.as_ref().is_some() {
+            return Err(PyException::new_err(
+                "cannot merge with an active transaction",
+            ));
+        }
+        inner
+            .doc
+            .merge(&mut other_inner.doc)
+            .map(|change_hashes| change_hashes.iter().map(|h| PyChangeHash(*h)).collect())
+            .map_err(|e| PyException::new_err(e.to_string()))
+    }
+
     fn get(
         &self,
         py: Python,
