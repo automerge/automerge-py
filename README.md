@@ -16,7 +16,7 @@ Install the bindings with `pip install automerge`.
 Now you can create a document and do all sorts of Automerge things with it!
 
 ```py
-from automerge import Document, ROOT, ObjType, ScalarType
+from automerge.core import Document, ROOT, ObjType, ScalarType
 
 doc = Document()
 with doc.transaction() as tx:
