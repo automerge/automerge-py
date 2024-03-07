@@ -176,6 +176,20 @@ impl Document {
         }
     }
 
+    fn get_actor<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        if inner.tx.as_ref().is_some() {
+            return Err(PyException::new_err(
+                "cannot get actor id with an active transaction",
+            ));
+        }
+
+        Ok(PyBytes::new(py, inner.doc.get_actor().to_bytes()))
+    }
+
     fn transaction(&self) -> PyResult<Transaction> {
         let mut inner = self
             .inner
@@ -310,6 +324,26 @@ impl Document {
             .merge(&mut other_inner.doc)
             .map(|change_hashes| change_hashes.iter().map(|h| PyChangeHash(*h)).collect())
             .map_err(|e| PyException::new_err(e.to_string()))
+    }
+
+    fn get_changes(&self, have_deps: Vec<PyChangeHash>) -> PyResult<Vec<PyChange>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        if inner.tx.as_ref().is_some() {
+            return Err(PyException::new_err(
+                "cannot get changes with an active transaction",
+            ));
+        }
+
+        let changes: Vec<ChangeHash> = have_deps.iter().map(|h| h.0).collect();
+        Ok(inner
+            .doc
+            .get_changes(&changes)
+            .iter()
+            .map(|c| PyChange((*c).to_owned()))
+            .collect())
     }
 
     fn get(
@@ -847,5 +881,72 @@ impl Into<ExpandMark> for &PyExpandMark {
             PyExpandMark::Both => ExpandMark::Both,
             PyExpandMark::None => ExpandMark::None,
         }
+    }
+}
+
+#[pyclass(name = "Change")]
+#[derive(Debug)]
+struct PyChange(am::Change);
+
+#[pymethods]
+impl PyChange {
+    fn __repr__(&self) -> String {
+        format!("{:?}", self)
+    }
+
+    fn actor_id(&self) -> &[u8] {
+        self.0.actor_id().to_bytes()
+    }
+
+    fn other_actor_ids(&self) -> Vec<&[u8]> {
+        self.0
+            .other_actor_ids()
+            .iter()
+            .map(|id| id.to_bytes())
+            .collect()
+    }
+
+    fn __len__(&self) -> usize {
+        self.0.len()
+    }
+
+    fn max_op(&self) -> u64 {
+        self.0.max_op()
+    }
+
+    fn start_op(&self) -> u64 {
+        self.0.start_op().into()
+    }
+
+    fn message(&self) -> Option<String> {
+        self.0.message().cloned()
+    }
+
+    fn deps(&self) -> Vec<PyChangeHash> {
+        self.0.deps().iter().map(|h| PyChangeHash(*h)).collect()
+    }
+
+    fn hash(&self) -> PyChangeHash {
+        PyChangeHash(self.0.hash())
+    }
+
+    fn seq(&self) -> u64 {
+        self.0.seq()
+    }
+
+    fn timestamp<'py>(&self, py: Python<'py>) -> PyResult<&'py PyDateTime> {
+        PyDateTime::from_timestamp(py, (self.0.timestamp() as f64) / 1000.0, None)
+    }
+
+    fn bytes<'py>(&mut self, py: Python<'py>) -> &'py PyBytes {
+        PyBytes::new(py, self.0.bytes().as_ref())
+    }
+
+    fn raw_bytes(&self) -> &[u8] {
+        self.0.raw_bytes()
+    }
+
+    fn extra_bytes(&self) -> &[u8] {
+        self.0.extra_bytes()
     }
 }
