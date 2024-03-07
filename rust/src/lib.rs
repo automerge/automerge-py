@@ -118,12 +118,7 @@ impl Inner {
         .map_err(|e| PyException::new_err(e.to_string()))
     }
 
-    fn marks(
-        &self,
-        py: Python,
-        obj_id: PyObjId,
-        heads: Option<Vec<PyChangeHash>>,
-    ) -> PyResult<Vec<PyMark>> {
+    fn marks(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<PyMark>> {
         let res = if let Some(tx) = self.tx.as_ref() {
             match get_heads(heads) {
                 Some(heads) => tx.marks_at(obj_id.0, &heads),
@@ -336,17 +331,12 @@ impl Document {
         inner.text(obj_id, heads)
     }
 
-    fn marks(
-        &self,
-        py: Python,
-        obj_id: PyObjId,
-        heads: Option<Vec<PyChangeHash>>,
-    ) -> PyResult<Vec<PyMark>> {
+    fn marks(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<PyMark>> {
         let inner = self
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        inner.marks(py, obj_id, heads)
+        inner.marks(obj_id, heads)
     }
 }
 
@@ -438,17 +428,12 @@ impl Transaction {
         inner.text(obj_id, heads)
     }
 
-    fn marks(
-        &self,
-        py: Python,
-        obj_id: PyObjId,
-        heads: Option<Vec<PyChangeHash>>,
-    ) -> PyResult<Vec<PyMark>> {
+    fn marks(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<PyMark>> {
         let inner = self
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        inner.marks(py, obj_id, heads)
+        inner.marks(obj_id, heads)
     }
 
     fn put(
@@ -547,7 +532,16 @@ impl Transaction {
             .map_err(|e| PyException::new_err(format!("error putting: {}", e)))
     }
 
-    fn mark(&mut self, obj_id: PyObjId, mark: &PyMark, expand: &PyExpandMark) -> PyResult<()> {
+    fn mark(
+        &mut self,
+        obj_id: PyObjId,
+        start: usize,
+        end: usize,
+        name: &str,
+        value_type: &PyScalarType,
+        value: &PyAny,
+        expand: &PyExpandMark,
+    ) -> PyResult<()> {
         let mut inner = self
             .inner
             .write()
@@ -555,9 +549,10 @@ impl Transaction {
         let Some(tx) = inner.tx.as_mut() else {
             return Err(PyException::new_err("transaction no longer active"));
         };
+        let value = import_scalar(value, value_type)?;
         tx.mark(
             obj_id.0,
-            Mark::new(mark.name.clone(), mark.value.clone(), mark.start, mark.end),
+            Mark::new(name.to_owned(), value, start, end),
             expand.into(),
         )
         .map_err(|e| PyException::new_err(e.to_string()))
@@ -640,6 +635,7 @@ fn _automerge(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PySyncState>()?;
     m.add_class::<PyMessage>()?;
     m.add_class::<PyScalarType>()?;
+    m.add_class::<PyExpandMark>()?;
     m.add("ROOT", PyObjId(am::ROOT))?;
     Ok(())
 }
@@ -790,7 +786,8 @@ impl<'a> IntoPy<PyObject> for PyValue<'a> {
     }
 }
 
-#[pyclass]
+#[pyclass(name = "Mark", get_all, set_all)]
+#[derive(Debug)]
 struct PyMark {
     start: usize,
     end: usize,
@@ -798,7 +795,14 @@ struct PyMark {
     value: PyScalarValue,
 }
 
-#[pyclass]
+#[pymethods]
+impl PyMark {
+    fn __repr__(&self) -> String {
+        format!("{:?}", self)
+    }
+}
+
+#[pyclass(name = "ExpandMark")]
 enum PyExpandMark {
     Before,
     After,
