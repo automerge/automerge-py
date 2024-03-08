@@ -12,6 +12,12 @@ def test_basic():
 
     assert extract(doc) == {'hello': {'test': 'world'}, 'text': 'hi'}
 
+def test_actor_id():
+    doc = Document(actor_id=b'foo')
+    assert doc.get_actor() == b'foo'
+    doc.set_actor(b'bar')
+    assert doc.get_actor() == b'bar'
+
 def test_keys():
     doc = Document()
 

@@ -195,6 +195,21 @@ impl Document {
         Ok(PyBytes::new(py, inner.doc.get_actor().to_bytes()))
     }
 
+    fn set_actor(&mut self, actor_id: &[u8]) -> PyResult<()> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
+        if inner.tx.as_ref().is_some() {
+            return Err(PyException::new_err(
+                "cannot set actor with an active transaction",
+            ));
+        }
+
+        inner.doc.set_actor(ActorId::from(actor_id));
+        Ok(())
+    }
+
     fn transaction(&self) -> PyResult<Transaction> {
         let mut inner = self
             .inner
