@@ -69,7 +69,7 @@ def test_multi_author_changes():
 
     # docA and docB are the same now, so pick one arbitrarily to read changes
     # out of for history linearization
-    doc = docB
+    doc = docA
 
     changes = doc.get_changes([])
     assert changes[0].actor_id() == b'A'
