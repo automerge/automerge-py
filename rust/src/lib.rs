@@ -929,7 +929,8 @@ enum PyExpandMark {
     Before,
     After,
     Both,
-    None,
+    // "None" is a reserved word in Python.
+    Neither,
 }
 
 impl Into<ExpandMark> for &PyExpandMark {
@@ -938,7 +939,7 @@ impl Into<ExpandMark> for &PyExpandMark {
             PyExpandMark::Before => ExpandMark::Before,
             PyExpandMark::After => ExpandMark::After,
             PyExpandMark::Both => ExpandMark::Both,
-            PyExpandMark::None => ExpandMark::None,
+            PyExpandMark::Neither => ExpandMark::None,
         }
     }
 }
