@@ -753,12 +753,17 @@ impl PyMessage {
 /// A Python module implemented in Rust.
 #[pymodule]
 fn _automerge(_py: Python, m: &PyModule) -> PyResult<()> {
+    // Classes
     m.add_class::<Document>()?;
-    m.add_class::<PyObjType>()?;
     m.add_class::<PySyncState>()?;
     m.add_class::<PyMessage>()?;
+
+    // Enums
+    m.add_class::<PyObjType>()?;
     m.add_class::<PyScalarType>()?;
     m.add_class::<PyExpandMark>()?;
+
+    // Constants
     m.add("ROOT", PyObjId(am::ROOT))?;
     Ok(())
 }
