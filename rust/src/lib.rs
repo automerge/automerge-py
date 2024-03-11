@@ -954,10 +954,12 @@ impl PyChange {
         format!("{:?}", self.0)
     }
 
+    #[getter]
     fn actor_id(&self) -> &[u8] {
         self.0.actor_id().to_bytes()
     }
 
+    #[getter]
     fn other_actor_ids(&self) -> Vec<&[u8]> {
         self.0
             .other_actor_ids()
@@ -970,42 +972,52 @@ impl PyChange {
         self.0.len()
     }
 
+    #[getter]
     fn max_op(&self) -> u64 {
         self.0.max_op()
     }
 
+    #[getter]
     fn start_op(&self) -> u64 {
         self.0.start_op().into()
     }
 
+    #[getter]
     fn message(&self) -> Option<String> {
         self.0.message().cloned()
     }
 
+    #[getter]
     fn deps(&self) -> Vec<PyChangeHash> {
         self.0.deps().iter().map(|h| PyChangeHash(*h)).collect()
     }
 
+    #[getter]
     fn hash(&self) -> PyChangeHash {
         PyChangeHash(self.0.hash())
     }
 
+    #[getter]
     fn seq(&self) -> u64 {
         self.0.seq()
     }
 
+    #[getter]
     fn timestamp<'py>(&self, py: Python<'py>) -> PyResult<&'py PyDateTime> {
         PyDateTime::from_timestamp(py, (self.0.timestamp() as f64) / 1000.0, None)
     }
 
+    #[getter]
     fn bytes<'py>(&mut self, py: Python<'py>) -> &'py PyBytes {
         PyBytes::new(py, self.0.bytes().as_ref())
     }
 
+    #[getter]
     fn raw_bytes(&self) -> &[u8] {
         self.0.raw_bytes()
     }
 
+    #[getter]
     fn extra_bytes(&self) -> &[u8] {
         self.0.extra_bytes()
     }

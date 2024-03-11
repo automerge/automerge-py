@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 from automerge.core import Document, ROOT, ScalarType, ObjType, extract
 
 def test_get_changes():
@@ -10,29 +10,29 @@ def test_get_changes():
     changes = doc.get_changes([])
     assert len(changes) == 1
     change = changes[0]
-    assert change.actor_id() == doc.get_actor()
+    assert change.actor_id == doc.get_actor()
     assert len(change) == 1
-    assert change.max_op() == 1
-    assert change.start_op() == 1
-    assert change.message() == None
-    assert change.deps() == []
-    assert change.hash() is not None
-    assert change.seq() == 1
-    assert isinstance(change.timestamp(), datetime.datetime)
-    assert change.bytes() is not None
+    assert change.max_op == 1
+    assert change.start_op == 1
+    assert change.message == None
+    assert change.deps == []
+    assert change.hash is not None
+    assert change.seq == 1
+    assert isinstance(change.timestamp, datetime)
+    assert change.bytes is not None
 
     with doc.transaction() as tx:
         tx.put(ROOT, "foo", ScalarType.Str, "bar")
     changes = doc.get_changes([])
     assert len(changes) == 2
-    assert changes[0].hash() == change.hash()
-    assert changes[1].deps() == [change.hash()]
-    assert changes[1].seq() == 2
-    second_change_hash = changes[1].hash()
+    assert changes[0].hash == change.hash
+    assert changes[1].deps == [change.hash]
+    assert changes[1].seq == 2
+    second_change_hash = changes[1].hash
 
-    changes = doc.get_changes([change.hash()])
+    changes = doc.get_changes([change.hash])
     assert len(changes) == 1
-    assert changes[0].hash() == second_change_hash
+    assert changes[0].hash == second_change_hash
 
 def test_multi_author_changes():
     docA = Document(actor_id=b'A')
@@ -72,22 +72,22 @@ def test_multi_author_changes():
     doc = docA
 
     changes = doc.get_changes([])
-    assert changes[0].actor_id() == b'A'
-    assert changes[1].actor_id() == b'B'
+    assert changes[0].actor_id == b'A'
+    assert changes[1].actor_id == b'B'
 
     last_actor = None
     snapshots = []
     seen_heads = []
     # Go through each of the changes, saving when the author changes.
     for change in changes:
-        if change.actor_id() != last_actor:
+        if change.actor_id != last_actor:
             # Do a save!
             snapshot = doc.text(text, seen_heads)
             snapshots.append((snapshot, last_actor))
-            last_actor = change.actor_id()
+            last_actor = change.actor_id
         # Could do some optimization here to remove things from seen_heads that
         # are ancestors of this change.
-        seen_heads.append(change.hash())
+        seen_heads.append(change.hash)
     # We could keep waiting for more changes to come in from the current last
     # actor, but let's say we waited a while and we want to persist now.
     snapshots.append((doc.text(text), last_actor))
