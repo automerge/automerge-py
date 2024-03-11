@@ -251,55 +251,6 @@ impl Document {
         })
     }
 
-    fn generate_sync_message(&self, state: &mut PySyncState) -> PyResult<Option<PyMessage>> {
-        let inner = self
-            .inner
-            .read()
-            .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.is_some() {
-            return Err(PyException::new_err(
-                "cannot sync with an active transaction",
-            ));
-        }
-        Ok(inner.doc.generate_sync_message(&mut state.0).map(PyMessage))
-    }
-
-    fn receive_sync_message(
-        &mut self,
-        state: &mut PySyncState,
-        message: &mut PyMessage,
-    ) -> PyResult<()> {
-        let mut inner = self
-            .inner
-            .write()
-            .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.is_some() {
-            return Err(PyException::new_err(
-                "cannot sync with an active transaction",
-            ));
-        }
-        inner
-            .doc
-            .receive_sync_message(&mut state.0, message.0.clone())
-            .map_err(|e| PyException::new_err(e.to_string()))
-    }
-
-    fn get_heads(&self) -> PyResult<Vec<PyChangeHash>> {
-        let inner = self
-            .inner
-            .read()
-            .map_err(|e| PyException::new_err(e.to_string()))?;
-        Ok(inner.get_heads())
-    }
-
-    fn object_type(&self, obj_id: PyObjId) -> PyResult<PyObjType> {
-        let inner = self
-            .inner
-            .read()
-            .map_err(|e| PyException::new_err(e.to_string()))?;
-        inner.object_type(obj_id)
-    }
-
     fn fork(&self, heads: Option<Vec<PyChangeHash>>) -> PyResult<Document> {
         let inner = self
             .inner
@@ -372,6 +323,55 @@ impl Document {
             .into_iter()
             .map(|p| PyPatch(p))
             .collect())
+    }
+
+    fn generate_sync_message(&self, state: &mut PySyncState) -> PyResult<Option<PyMessage>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        if inner.tx.is_some() {
+            return Err(PyException::new_err(
+                "cannot sync with an active transaction",
+            ));
+        }
+        Ok(inner.doc.generate_sync_message(&mut state.0).map(PyMessage))
+    }
+
+    fn receive_sync_message(
+        &mut self,
+        state: &mut PySyncState,
+        message: &mut PyMessage,
+    ) -> PyResult<()> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        if inner.tx.is_some() {
+            return Err(PyException::new_err(
+                "cannot sync with an active transaction",
+            ));
+        }
+        inner
+            .doc
+            .receive_sync_message(&mut state.0, message.0.clone())
+            .map_err(|e| PyException::new_err(e.to_string()))
+    }
+
+    fn get_heads(&self) -> PyResult<Vec<PyChangeHash>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        Ok(inner.get_heads())
+    }
+
+    fn object_type(&self, obj_id: PyObjId) -> PyResult<PyObjType> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.object_type(obj_id)
     }
 
     fn get_changes(&self, have_deps: Vec<PyChangeHash>) -> PyResult<Vec<PyChange>> {
