@@ -1,6 +1,6 @@
 from automerge.core import Document, ROOT, SyncState, Message, ScalarType, extract
 
-def test_sync():
+def test_sync() -> None:
     doc1 = Document()
     with doc1.transaction() as tx:
         tx.put(ROOT, "hello", ScalarType.Str, "world")

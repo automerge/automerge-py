@@ -1,6 +1,6 @@
 from automerge.core import Document, ROOT, ObjType, ScalarType, ExpandMark, extract
 
-def test_marks():
+def test_marks() -> None:
     doc = Document()
     with doc.transaction() as tx:
         text = tx.put_object(ROOT, "text", ObjType.Text)
@@ -14,6 +14,3 @@ def test_marks():
     assert mark.start == 0
     assert mark.end == 1
     assert mark.value == (ScalarType.Boolean, True)
-
-if __name__ == "__main__":
-    test_marks()

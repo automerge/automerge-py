@@ -1,7 +1,7 @@
 import pytest
 from automerge.core import Document, ROOT, ObjType, ScalarType, extract
 
-def test_basic():
+def test_basic() -> None:
     doc = Document()
 
     with doc.transaction() as tx:
@@ -13,23 +13,23 @@ def test_basic():
 
     assert extract(doc) == {'hello': {'test': 'world'}, 'text': 'hi'}
 
-def test_rollback():
+def test_rollback() -> None:
     doc = Document()
 
     with pytest.raises(Exception) as e_info:
         with doc.transaction() as tx:
             tx.put_object(ROOT, "hello", ObjType.Map)
             raise Exception("hi")
-    assert e_info.value.args[0] == "hi"
+    assert e_info.value.args[0] == "hi" # type: ignore[misc]
     assert extract(doc) == {}
 
-def test_actor_id():
+def test_actor_id() -> None:
     doc = Document(actor_id=b'foo')
     assert doc.get_actor() == b'foo'
     doc.set_actor(b'bar')
     assert doc.get_actor() == b'bar'
 
-def test_keys():
+def test_keys() -> None:
     doc = Document()
 
     with doc.transaction() as tx:
@@ -45,7 +45,7 @@ def test_keys():
     list_keys = doc.keys(list_id)
     assert len(list_keys) == 2
 
-def test_values():
+def test_values() -> None:
     doc = Document()
 
     with doc.transaction() as tx:
@@ -61,7 +61,7 @@ def test_values():
     values = doc.values(list_id)
     assert [v[0] for v in values] == [(ScalarType.Str, "one"), (ScalarType.Boolean, True)]
 
-def test_diff():
+def test_diff() -> None:
     doc = Document()
 
     with doc.transaction() as tx:

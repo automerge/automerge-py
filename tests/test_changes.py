@@ -1,7 +1,8 @@
 from datetime import datetime
+from typing import List
 from automerge.core import Document, ROOT, ScalarType, ObjType, extract
 
-def test_get_changes():
+def test_get_changes() -> None:
     doc = Document()
     changes = doc.get_changes([])
     assert len(changes) == 0
@@ -34,7 +35,7 @@ def test_get_changes():
     assert len(changes) == 1
     assert changes[0].hash == second_change_hash
 
-def test_multi_author_changes():
+def test_multi_author_changes() -> None:
     docA = Document(actor_id=b'A')
     docB = Document(actor_id=b'B')
 
@@ -75,9 +76,9 @@ def test_multi_author_changes():
     assert changes[0].actor_id == b'A'
     assert changes[1].actor_id == b'B'
 
-    last_actor = None
-    snapshots = []
-    seen_heads = []
+    last_actor: bytes | None = None
+    snapshots: List[tuple[str, bytes | None]] = []
+    seen_heads: List[bytes] = []
     # Go through each of the changes, saving when the author changes.
     for change in changes:
         if change.actor_id != last_actor:

@@ -1,6 +1,6 @@
 from automerge.core import Document, ROOT, ObjType, ScalarType, extract
 
-def test_readme():
+def test_readme() -> None:
     doc = Document()
     with doc.transaction() as tx:
         list = tx.put_object(ROOT, "colours", ObjType.List)

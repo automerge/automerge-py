@@ -1,22 +1,30 @@
+from typing import List
 from .. import _automerge
 from .._automerge import *
 
-def extract(doc, obj_id=ROOT):
+Thing = dict[str, 'Thing'] | List['Thing'] | ScalarValue
+
+def extract(doc: Document, obj_id: bytes = ROOT) -> Thing:
     match doc.object_type(obj_id):
         case ObjType.Map:
-            d = {}
+            d: dict[str, Thing] = {}
             for k in doc.keys(obj_id):
-                v, id = doc.get(obj_id, k)
+                x = doc.get(obj_id, k)
+                assert x is not None
+                v, id = x
                 d[k] = extract(doc, id) if isinstance(v, ObjType) else v[1]
             return d
         case ObjType.List:
-            d = []
-            for k in range(0, doc.length(obj_id)):
-                v, id = doc.get(obj_id, k)
-                d.append(extract(doc, id) if isinstance(v, ObjType) else v[1])
-            return d
+            l: List[Thing] = []
+            for k2 in range(0, doc.length(obj_id)):
+                x = doc.get(obj_id, k2)
+                assert x is not None
+                v, id = x
+                l.append(extract(doc, id) if isinstance(v, ObjType) else v[1])
+            return l
         case ObjType.Text:
             return doc.text(obj_id)
+    raise Exception("unexpected result from doc.object_type")
 
 
 __doc__ = _automerge.__doc__
