@@ -186,7 +186,7 @@ impl Document {
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.as_ref().is_some() {
+        if inner.tx.is_some() {
             return Err(PyException::new_err(
                 "cannot get actor id with an active transaction",
             ));
@@ -200,7 +200,7 @@ impl Document {
             .inner
             .write()
             .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
-        if inner.tx.as_ref().is_some() {
+        if inner.tx.is_some() {
             return Err(PyException::new_err(
                 "cannot set actor with an active transaction",
             ));
@@ -215,7 +215,7 @@ impl Document {
             .inner
             .write()
             .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
-        if let Some(tx) = inner.tx.as_ref() {
+        if inner.tx.is_some() {
             return Err(PyException::new_err("transaction already active"));
         }
 
@@ -234,7 +234,7 @@ impl Document {
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.as_ref().is_some() {
+        if inner.tx.is_some() {
             return Err(PyException::new_err(
                 "cannot save with an active transaction",
             ));
@@ -256,7 +256,7 @@ impl Document {
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.as_ref().is_some() {
+        if inner.tx.is_some() {
             return Err(PyException::new_err(
                 "cannot sync with an active transaction",
             ));
@@ -273,7 +273,7 @@ impl Document {
             .inner
             .write()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.as_ref().is_some() {
+        if inner.tx.is_some() {
             return Err(PyException::new_err(
                 "cannot sync with an active transaction",
             ));
@@ -305,7 +305,7 @@ impl Document {
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.as_ref().is_some() {
+        if inner.tx.is_some() {
             return Err(PyException::new_err(
                 "cannot fork with an active transaction",
             ));
@@ -325,7 +325,7 @@ impl Document {
             .inner
             .write()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.as_ref().is_some() {
+        if inner.tx.is_some() {
             return Err(PyException::new_err(
                 "cannot merge with an active transaction",
             ));
@@ -334,7 +334,7 @@ impl Document {
             .inner
             .write()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        if other_inner.tx.as_ref().is_some() {
+        if other_inner.tx.is_some() {
             return Err(PyException::new_err(
                 "cannot merge with an active transaction",
             ));
@@ -355,7 +355,7 @@ impl Document {
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.as_ref().is_some() {
+        if inner.tx.is_some() {
             return Err(PyException::new_err(
                 "cannot diff with an active transaction",
             ));
@@ -379,7 +379,7 @@ impl Document {
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.as_ref().is_some() {
+        if inner.tx.is_some() {
             return Err(PyException::new_err(
                 "cannot get changes with an active transaction",
             ));
