@@ -684,9 +684,9 @@ impl Transaction {
     fn unmark(
         &mut self,
         obj_id: PyObjId,
-        key: &str,
         start: usize,
         end: usize,
+        name: &str,
         expand: &PyExpandMark,
     ) -> PyResult<()> {
         let mut inner = self
@@ -696,7 +696,7 @@ impl Transaction {
         let Some(tx) = inner.tx.as_mut() else {
             return Err(PyException::new_err("transaction no longer active"));
         };
-        tx.unmark(obj_id.0, key, start, end, expand.into())
+        tx.unmark(obj_id.0, name, start, end, expand.into())
             .map_err(|e| PyException::new_err(e.to_string()))
     }
 }
