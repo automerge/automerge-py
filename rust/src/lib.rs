@@ -104,8 +104,8 @@ impl Inner {
         } else {
             self.doc.get_heads()
         }
-        .iter()
-        .map(|c| PyChangeHash(*c))
+        .into_iter()
+        .map(|c| PyChangeHash(c))
         .collect()
     }
 
@@ -152,7 +152,7 @@ impl Inner {
         }
         .map_err(|e| PyException::new_err(e.to_string()))?;
         Ok(res
-            .iter()
+            .into_iter()
             .map(|m| PyMark {
                 start: m.start,
                 end: m.end,
@@ -342,7 +342,7 @@ impl Document {
         inner
             .doc
             .merge(&mut other_inner.doc)
-            .map(|change_hashes| change_hashes.iter().map(|h| PyChangeHash(*h)).collect())
+            .map(|change_hashes| change_hashes.into_iter().map(|h| PyChangeHash(h)).collect())
             .map_err(|e| PyException::new_err(e.to_string()))
     }
 
@@ -369,8 +369,8 @@ impl Document {
                 &after_heads,
                 am::patches::TextRepresentation::Array,
             )
-            .iter()
-            .map(|p| PyPatch(p.clone()))
+            .into_iter()
+            .map(|p| PyPatch(p))
             .collect())
     }
 
@@ -389,8 +389,8 @@ impl Document {
         Ok(inner
             .doc
             .get_changes(&changes)
-            .iter()
-            .map(|c| PyChange((*c).to_owned()))
+            .into_iter()
+            .map(|c| PyChange(c.to_owned()))
             .collect())
     }
 
