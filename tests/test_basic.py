@@ -1,3 +1,4 @@
+import pytest
 from automerge.core import Document, ROOT, ObjType, ScalarType, extract
 
 def test_basic():
@@ -11,6 +12,16 @@ def test_basic():
         tx.insert(text, 1, ScalarType.Str, "i")
 
     assert extract(doc) == {'hello': {'test': 'world'}, 'text': 'hi'}
+
+def test_rollback():
+    doc = Document()
+
+    with pytest.raises(Exception) as e_info:
+        with doc.transaction() as tx:
+            tx.put_object(ROOT, "hello", ObjType.Map)
+            raise Exception("hi")
+    assert e_info.value.args[0] == "hi"
+    assert extract(doc) == {}
 
 def test_actor_id():
     doc = Document(actor_id=b'foo')
