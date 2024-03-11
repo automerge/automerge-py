@@ -15,4 +15,3 @@ dynamic = ["version"]
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "automerge._automerge"
-

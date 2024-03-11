@@ -1,8 +1,9 @@
-from typing import List
+from datetime import datetime
 from .. import _automerge
 from .._automerge import *
 
-Thing = dict[str, 'Thing'] | List['Thing'] | ScalarValue
+ScalarValue = str | bytes | int | float | bool | datetime | None
+Thing = dict[str, 'Thing'] | list['Thing'] | ScalarValue
 
 def extract(doc: Document, obj_id: bytes = ROOT) -> Thing:
     match doc.object_type(obj_id):
@@ -15,7 +16,7 @@ def extract(doc: Document, obj_id: bytes = ROOT) -> Thing:
                 d[k] = extract(doc, id) if isinstance(v, ObjType) else v[1]
             return d
         case ObjType.List:
-            l: List[Thing] = []
+            l: list[Thing] = []
             for k2 in range(0, doc.length(obj_id)):
                 x = doc.get(obj_id, k2)
                 assert x is not None
