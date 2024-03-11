@@ -523,6 +523,18 @@ impl Transaction {
         inner.keys(obj_id, heads)
     }
 
+    fn values(
+        &self,
+        obj_id: PyObjId,
+        heads: Option<Vec<PyChangeHash>>,
+    ) -> PyResult<Vec<(PyValue, PyObjId)>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.values(obj_id, heads)
+    }
+
     fn length(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<usize> {
         let inner = self
             .inner
