@@ -750,11 +750,17 @@ impl PyMessage {
     }
 }
 
+#[pyfunction]
+fn random_actor_id<'py>(py: Python<'py>) -> &'py PyBytes {
+    PyBytes::new(py, ActorId::random().to_bytes())
+}
+
 /// A Python module implemented in Rust.
 #[pymodule]
 fn _automerge(_py: Python, m: &PyModule) -> PyResult<()> {
     // Classes
     m.add_class::<Document>()?;
+    m.add_class::<Transaction>()?;
     m.add_class::<PySyncState>()?;
     m.add_class::<PyMessage>()?;
 
@@ -765,6 +771,9 @@ fn _automerge(_py: Python, m: &PyModule) -> PyResult<()> {
 
     // Constants
     m.add("ROOT", PyObjId(am::ROOT))?;
+
+    // Functions
+    m.add_function(wrap_pyfunction!(random_actor_id, m)?)?;
     Ok(())
 }
 

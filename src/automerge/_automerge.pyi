@@ -3,9 +3,7 @@ from types import TracebackType
 from datetime import datetime
 from enum import Enum
 
-from automerge.core import ScalarValue
-
-Value = ObjType | tuple[ScalarType, ScalarValue]
+from automerge.core import ScalarValue, Value
 
 class Document:
     def __init__(self, actor_id: Optional[bytes] = None) -> None: ...
@@ -110,3 +108,5 @@ class ExpandMark(Enum):
     Neither: ExpandMark
 
 ROOT: bytes
+
+def random_actor_id() -> bytes: ...

@@ -4,6 +4,7 @@ from .._automerge import *
 
 ScalarValue = str | bytes | int | float | bool | datetime | None
 Thing = dict[str, 'Thing'] | list['Thing'] | ScalarValue
+Value = ObjType | tuple[ScalarType, ScalarValue]
 
 def extract(doc: Document, obj_id: bytes = ROOT) -> Thing:
     match doc.object_type(obj_id):
@@ -26,7 +27,6 @@ def extract(doc: Document, obj_id: bytes = ROOT) -> Thing:
         case ObjType.Text:
             return doc.text(obj_id)
     raise Exception("unexpected result from doc.object_type")
-
 
 __doc__ = _automerge.__doc__
 if hasattr(_automerge, "__all__"):
