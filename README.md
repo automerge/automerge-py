@@ -15,6 +15,12 @@ Install the bindings with `pip install automerge`.
 
 Now you can create a document and do all sorts of Automerge things with it!
 
+> Note: this package currently only contains `automerge.core`, which is a
+> low-level wrapper around the [Rust automerge
+> library](https://docs.rs/automerge/latest/automerge/index.html).
+>
+> A more ergonomic wrapper is currently in the works.
+
 ```py
 from automerge.core import Document, ROOT, ObjType, ScalarType
 
@@ -32,4 +38,17 @@ with doc.transaction() as tx:
     tx.delete(list, 0)
 
 doc.merge(doc2)  # `doc` now contains {"colours": ["green", "red"]}
+```
+
+## Developing
+
+```bash
+# Create venv in "env" folder (required by maturin)
+python3 -m venv env
+# Activate venv
+source ./env/bin/activate
+# Install maturin
+pip install maturin
+# Build the bindings
+maturin develop
 ```
