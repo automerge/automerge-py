@@ -1,8 +1,4 @@
-/target
-.vim
-__pycache__
-/dist
-/build
-/automerge.egg-info
+env/
+target/
+__pycache__/
 *.so
-automerge/__pycache__
