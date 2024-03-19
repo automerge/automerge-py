@@ -40,11 +40,10 @@ class ReadProxy:
     def _maybe_wrap(self, x: tuple[core.Value, bytes]) -> 'MapReadProxy | ListReadProxy | core.ScalarValue':
         value, obj_id = x
         if isinstance(value, core.ObjType):
-            match value:
-                case core.ObjType.List:
-                    return ListReadProxy(self._doc, obj_id, self._heads)
-                case core.ObjType.Map:
-                    return MapReadProxy(self._doc, obj_id, self._heads)
+            if value == core.ObjType.List:
+                return ListReadProxy(self._doc, obj_id, self._heads)
+            elif value == core.ObjType.Map:
+                return MapReadProxy(self._doc, obj_id, self._heads)
             raise Exception("unknown obj type")
         _, v = value
         return v
@@ -142,11 +141,10 @@ class ListWriteProxy(WriteProxy, MutableSequence[MutableProxyThing]):
         if x is None: return None
         value, obj_id = x
         if isinstance(value, core.ObjType):
-            match value:
-                case core.ObjType.Map:
-                    return MapWriteProxy(self._tx, obj_id, self._heads)
-                case core.ObjType.List:
-                    return ListWriteProxy(self._tx, obj_id, self._heads)
+            if value == core.ObjType.Map:
+                return MapWriteProxy(self._tx, obj_id, self._heads)
+            elif value == core.ObjType.List:
+                return ListWriteProxy(self._tx, obj_id, self._heads)
             raise Exception("unknown ObjType")
         _, v = value
         return v
