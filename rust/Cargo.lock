@@ -16,16 +16,6 @@ checksum = "d468802bab17cbc0cc575e9b053f41e72aa36bfa6b7f55e3529ffa43161b97fa"
 
 [[package]]
 name = "automerge"
-version = "0.1.0"
-dependencies = [
- "automerge 0.5.7",
- "hex",
- "pyo3",
- "thiserror",
-]
-
-[[package]]
-name = "automerge"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c059747d9ef133802da22926ea54039de90f85b349a920f16a6d1573da0f2580"
@@ -44,6 +34,16 @@ dependencies = [
  "tracing",
  "unicode-segmentation",
  "uuid",
+]
+
+[[package]]
+name = "automerge"
+version = "1.0.0-rc1"
+dependencies = [
+ "automerge 0.5.7",
+ "hex",
+ "pyo3",
+ "thiserror",
 ]
 
 [[package]]
