@@ -1,6 +1,6 @@
 import automerge.core as core
 from datetime import datetime
-from typing import Iterator, cast, Mapping, Sequence, MutableMapping, MutableSequence, overload, TypeAlias, Iterable, KeysView
+from typing import Iterator, cast, Mapping, Sequence, MutableMapping, MutableSequence, overload, Iterable, List, Union, Tuple, Optional
 from contextlib import contextmanager
 
 class ActorId:
@@ -19,14 +19,14 @@ class ChangeHash:
     def __init__(self, hash: bytes):
         self.hash = hash
 
-ProxyThing: TypeAlias = 'core.ScalarValue | Mapping[str, ProxyThing] | Sequence[ProxyThing]'
+ProxyThing = Union[core.ScalarValue, Mapping[str, 'ProxyThing'], Sequence['ProxyThing']]
 
 class ReadProxy:
     _doc: core.Document
     _obj_id: bytes
-    _heads: list[bytes] | None
+    _heads: Union[List[bytes], None]
 
-    def __init__(self, doc: core.Document, obj_id: bytes, heads: list[bytes] | None):
+    def __init__(self, doc: core.Document, obj_id: bytes, heads: Optional[List[bytes]]):
         self._doc = doc
         self._obj_id = obj_id
         self._heads = heads
@@ -37,7 +37,7 @@ class ReadProxy:
     def to_py(self) -> core.Thing:
         return core.extract(self._doc, self._obj_id)
 
-    def _maybe_wrap(self, x: tuple[core.Value, bytes]) -> 'MapReadProxy | ListReadProxy | core.ScalarValue':
+    def _maybe_wrap(self, x: Tuple[core.Value, bytes]) -> 'MapReadProxy | ListReadProxy | core.ScalarValue':
         value, obj_id = x
         if isinstance(value, core.ObjType):
             if value == core.ObjType.List:
@@ -62,7 +62,7 @@ class ListReadProxy(ReadProxy, Sequence[ProxyThing]):
     def __getitem__(self, key: int) -> ProxyThing: ...
     @overload
     def __getitem__(self, key: slice) -> Sequence[ProxyThing]: ...
-    def __getitem__(self, key: int | slice) -> ProxyThing | Sequence[ProxyThing]:
+    def __getitem__(self, key: Union[int, slice]) -> Union[ProxyThing, Sequence[ProxyThing]]:
         if not isinstance(key, int): raise NotImplemented
         x = self._doc.get(self._obj_id, key, self._heads)
         if x is None: raise IndexError()
@@ -71,9 +71,9 @@ class ListReadProxy(ReadProxy, Sequence[ProxyThing]):
 class WriteProxy:
     _tx: core.Transaction
     _obj_id: bytes
-    _heads: list[bytes] | None
+    _heads: Optional[List[bytes]]
     
-    def __init__(self, tx: core.Transaction, obj_id: bytes, heads: list[bytes] | None) -> None:
+    def __init__(self, tx: core.Transaction, obj_id: bytes, heads: Optional[List[bytes]]) -> None:
         self._tx = tx
         self._obj_id = obj_id
         self._heads = heads
@@ -81,12 +81,12 @@ class WriteProxy:
     def __len__(self) -> int:
         return self._tx.length(self._obj_id, self._heads)
 
-MutableProxyThing: TypeAlias = 'core.ScalarValue | MutableMapping[str, MutableProxyThing] | MutableSequence[MutableProxyThing]'
+MutableProxyThing = Union[core.ScalarValue, MutableMapping[str, 'MutableProxyThing'], MutableSequence['MutableProxyThing']]
 
 class MapWriteProxy(WriteProxy, MutableMapping[str, MutableProxyThing]):
     _tx: core.Transaction
 
-    def __getitem__(self, key: str | int) -> MutableProxyThing:
+    def __getitem__(self, key: Union[str, int]) -> MutableProxyThing:
         x = self._tx.get(self._obj_id, key, self._heads)
         if x is None: return None
         value, obj_id = x
@@ -134,7 +134,7 @@ class ListWriteProxy(WriteProxy, MutableSequence[MutableProxyThing]):
     def __getitem__(self, key: int) -> MutableProxyThing: ...
     @overload
     def __getitem__(self, key: slice) -> MutableSequence[MutableProxyThing]: ...
-    def __getitem__(self, key: int | slice) -> MutableProxyThing | MutableSequence[MutableProxyThing]:
+    def __getitem__(self, key: Union[int, slice]) -> Union[MutableProxyThing, MutableSequence[MutableProxyThing]]:
         if not isinstance(key, int): raise NotImplemented
         x = self._tx.get(self._obj_id, key, self._heads)
         if x is None: return None
@@ -152,7 +152,7 @@ class ListWriteProxy(WriteProxy, MutableSequence[MutableProxyThing]):
     def __setitem__(self, key: int, value: MutableProxyThing) -> None: ...
     @overload
     def __setitem__(self, key: slice, value: Iterable[MutableProxyThing]) -> None: ...
-    def __setitem__(self, idx: int | slice, value: MutableProxyThing | Iterable[MutableProxyThing]) -> None:
+    def __setitem__(self, idx: Union[int, slice], value: Union[MutableProxyThing, Iterable[MutableProxyThing]]) -> None:
         if not isinstance(idx, int): raise NotImplemented
         if isinstance(value, MutableMapping):
             if idx >= self._tx.length(self._obj_id, self._heads):
@@ -192,11 +192,11 @@ class ListWriteProxy(WriteProxy, MutableSequence[MutableProxyThing]):
     def __delitem__(self, idx: int) -> None: ...
     @overload
     def __delitem__(self, idx: slice) -> None: ...
-    def __delitem__(self, idx: int | slice) -> None:
+    def __delitem__(self, idx: Union[int, slice]) -> None:
         if not isinstance(idx, int): raise NotImplemented
         self._tx.delete(self._obj_id, idx)
         
-    def insert(self, idx: int, value: core.ScalarValue | MutableMapping[str, MutableProxyThing] | MutableSequence[MutableProxyThing] | None) -> None:
+    def insert(self, idx: int, value: Union[core.ScalarValue, MutableMapping[str, MutableProxyThing], MutableSequence[MutableProxyThing], None]) -> None:
         if not isinstance(idx, int): raise NotImplemented
         if isinstance(value, MutableMapping):
             obj_id = self._tx.insert_object(self._obj_id, idx, core.ObjType.Map)
@@ -243,7 +243,7 @@ def _infer_scalar_type(value: core.ScalarValue) -> core.ScalarType:
 
 
 class Document(MapReadProxy):
-    def __init__(self, actor_id: ActorId | None = None) -> None:
+    def __init__(self, actor_id: Optional[ActorId] = None) -> None:
         self._doc = core.Document(actor_id.id if actor_id else None)
         super().__init__(self._doc, core.ROOT, None)
         

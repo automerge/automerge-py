@@ -1,15 +1,16 @@
 from datetime import datetime
+from typing import Union, Dict, List, Tuple
 from .. import _automerge
 from .._automerge import *
 
-ScalarValue = str | bytes | int | float | bool | datetime | None
-Thing = dict[str, 'Thing'] | list['Thing'] | ScalarValue
-Value = ObjType | tuple[ScalarType, ScalarValue]
+ScalarValue = Union[str, bytes, int, float, bool, datetime, None]
+Thing = Union[Dict[str, 'Thing'], List['Thing'], ScalarValue]
+Value = Union[ObjType, Tuple[ScalarType, ScalarValue]]
 
 def extract(doc: Document, obj_id: bytes = ROOT) -> Thing:
     ot = doc.object_type(obj_id)
     if ot == ObjType.Map:
-        d: dict[str, Thing] = {}
+        d: Dict[str, Thing] = {}
         for k in doc.keys(obj_id):
             x = doc.get(obj_id, k)
             assert x is not None
@@ -17,7 +18,7 @@ def extract(doc: Document, obj_id: bytes = ROOT) -> Thing:
             d[k] = extract(doc, id) if isinstance(v, ObjType) else v[1]
         return d
     elif ot == ObjType.List:
-        l: list[Thing] = []
+        l: List[Thing] = []
         for k2 in range(0, doc.length(obj_id)):
             x = doc.get(obj_id, k2)
             assert x is not None
