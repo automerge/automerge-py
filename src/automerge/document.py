@@ -91,11 +91,10 @@ class MapWriteProxy(WriteProxy, MutableMapping[str, MutableProxyThing]):
         if x is None: return None
         value, obj_id = x
         if isinstance(value, core.ObjType):
-            match value:
-                case core.ObjType.Map:
-                    return MapWriteProxy(self._tx, obj_id, self._heads)
-                case core.ObjType.List:
-                    return ListWriteProxy(self._tx, obj_id, self._heads)
+            if value == core.ObjType.Map:
+                return MapWriteProxy(self._tx, obj_id, self._heads)
+            elif value == core.ObjType.List:
+                return ListWriteProxy(self._tx, obj_id, self._heads)
             raise Exception("unknown ObjType")
         _, v = value
         return v
