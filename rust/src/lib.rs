@@ -366,6 +366,17 @@ impl Document {
         Ok(inner.get_heads())
     }
 
+    fn get_last_local_change(&self) -> PyResult<Option<PyChange>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        Ok(inner
+            .doc
+            .get_last_local_change()
+            .map(|c| PyChange(c.to_owned())))
+    }
+
     fn object_type(&self, obj_id: PyObjId) -> PyResult<PyObjType> {
         let inner = self
             .inner

@@ -73,3 +73,31 @@ def test_diff() -> None:
     patch = doc.diff([], doc.get_heads())
     assert len(patch) == 4
 
+def test_text_heads() -> None:
+    doc1 = Document(actor_id=b'A')
+
+    with doc1.transaction() as tx:
+        text_id = tx.put_object(ROOT, "text", ObjType.Text)
+        tx.insert(text_id, 0, ScalarType.Str, "h")
+
+    doc2 = doc1.fork()
+    doc2.set_actor(b'B')
+
+    with doc1.transaction() as tx:
+        tx.insert(text_id, 1, ScalarType.Str, "i")
+
+    with doc2.transaction() as tx:
+        tx.insert(text_id, 1, ScalarType.Str, "o")
+
+    a_change = doc1.get_last_local_change()
+    assert a_change is not None
+    b_change = doc2.get_last_local_change()
+    assert b_change is not None
+
+    doc1.merge(doc2)
+    heads = doc1.get_heads()
+    assert len(heads) == 2
+
+    assert doc1.text(text_id, [a_change.hash]) == 'hi'
+    assert doc1.text(text_id, [b_change.hash]) == 'ho'
+    assert doc1.text(text_id, [a_change.hash, b_change.hash]) == 'hoi'

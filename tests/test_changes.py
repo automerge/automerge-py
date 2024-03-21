@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import List
-from automerge.core import Document, ROOT, ScalarType, ObjType, extract
+from typing import List, Optional, Tuple
+from automerge.core import Document, ROOT, ScalarType, ObjType
 
 def test_get_changes() -> None:
     doc = Document()
@@ -68,6 +68,8 @@ def test_multi_author_changes() -> None:
     docB.merge(docA)
     docA.merge(docB)
 
+    assert len(docA.get_heads()) == 2
+
     # docA and docB are the same now, so pick one arbitrarily to read changes
     # out of for history linearization
     doc = docA
@@ -76,8 +78,8 @@ def test_multi_author_changes() -> None:
     assert changes[0].actor_id == b'A'
     assert changes[1].actor_id == b'B'
 
-    last_actor: bytes | None = None
-    snapshots: List[tuple[str, bytes | None]] = []
+    last_actor: Optional[bytes] = None
+    snapshots: List[Tuple[str, Optional[bytes]]] = []
     seen_heads: List[bytes] = []
     # Go through each of the changes, saving when the author changes.
     for change in changes:
