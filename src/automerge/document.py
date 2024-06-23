@@ -63,7 +63,7 @@ class ListReadProxy(ReadProxy, Sequence[ProxyThing]):
     @overload
     def __getitem__(self, key: slice) -> Sequence[ProxyThing]: ...
     def __getitem__(self, key: Union[int, slice]) -> Union[ProxyThing, Sequence[ProxyThing]]:
-        if not isinstance(key, int): raise NotImplemented
+        if not isinstance(key, int): raise NotImplementedError
         x = self._doc.get(self._obj_id, key, self._heads)
         if x is None: raise IndexError()
         return self._maybe_wrap(x)
@@ -127,7 +127,7 @@ class MapWriteProxy(WriteProxy, MutableMapping[str, MutableProxyThing]):
         self._tx.delete(self._obj_id, key)
         
     def __iter__(self) -> Iterator[str]:
-        raise NotImplemented
+        raise NotImplementedError
 
 class ListWriteProxy(WriteProxy, MutableSequence[MutableProxyThing]):
     @overload
@@ -135,7 +135,7 @@ class ListWriteProxy(WriteProxy, MutableSequence[MutableProxyThing]):
     @overload
     def __getitem__(self, key: slice) -> MutableSequence[MutableProxyThing]: ...
     def __getitem__(self, key: Union[int, slice]) -> Union[MutableProxyThing, MutableSequence[MutableProxyThing]]:
-        if not isinstance(key, int): raise NotImplemented
+        if not isinstance(key, int): raise NotImplementedError
         x = self._tx.get(self._obj_id, key, self._heads)
         if x is None: return None
         value, obj_id = x
@@ -153,7 +153,7 @@ class ListWriteProxy(WriteProxy, MutableSequence[MutableProxyThing]):
     @overload
     def __setitem__(self, key: slice, value: Iterable[MutableProxyThing]) -> None: ...
     def __setitem__(self, idx: Union[int, slice], value: Union[MutableProxyThing, Iterable[MutableProxyThing]]) -> None:
-        if not isinstance(idx, int): raise NotImplemented
+        if not isinstance(idx, int): raise NotImplementedError
         if isinstance(value, MutableMapping):
             if idx >= self._tx.length(self._obj_id, self._heads):
                 obj_id = self._tx.insert_object(self._obj_id, idx, core.ObjType.Map)
@@ -193,11 +193,11 @@ class ListWriteProxy(WriteProxy, MutableSequence[MutableProxyThing]):
     @overload
     def __delitem__(self, idx: slice) -> None: ...
     def __delitem__(self, idx: Union[int, slice]) -> None:
-        if not isinstance(idx, int): raise NotImplemented
+        if not isinstance(idx, int): raise NotImplementedError
         self._tx.delete(self._obj_id, idx)
         
     def insert(self, idx: int, value: Union[core.ScalarValue, MutableMapping[str, MutableProxyThing], MutableSequence[MutableProxyThing], None]) -> None:
-        if not isinstance(idx, int): raise NotImplemented
+        if not isinstance(idx, int): raise NotImplementedError
         if isinstance(value, MutableMapping):
             obj_id = self._tx.insert_object(self._obj_id, idx, core.ObjType.Map)
             m = MapWriteProxy(self._tx, obj_id, self._heads)
@@ -251,4 +251,3 @@ class Document(MapReadProxy):
     def change(self) -> Iterator[MapWriteProxy]:
         with self._doc.transaction() as tx:
             yield MapWriteProxy(tx, core.ROOT, None)
-    
