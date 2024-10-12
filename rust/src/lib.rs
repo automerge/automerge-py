@@ -742,6 +742,16 @@ impl PySyncState {
     pub fn new() -> PySyncState {
         PySyncState(am::sync::State::new())
     }
+    pub fn encode<'py>(&self, py: Python<'py>) -> &'py PyBytes {
+        PyBytes::new(py, &self.0.clone().encode())
+    }
+
+    #[staticmethod]
+    pub fn decode(bytes: &[u8]) -> PyResult<PySyncState> {
+        Ok(PySyncState(
+            am::sync::State::decode(bytes).map_err(|e| PyException::new_err(e.to_string()))?,
+        ))
+    }
 }
 
 #[pyclass(name = "Message")]
