@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     mem::transmute,
     sync::{Arc, RwLock},
 };
@@ -181,7 +182,7 @@ impl Document {
         }
     }
 
-    fn get_actor<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
+    fn get_actor<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let inner = self
             .inner
             .read()
@@ -192,7 +193,7 @@ impl Document {
             ));
         }
 
-        Ok(PyBytes::new(py, inner.doc.get_actor().to_bytes()))
+        Ok(PyBytes::new_bound(py, inner.doc.get_actor().to_bytes()))
     }
 
     fn set_actor(&mut self, actor_id: &[u8]) -> PyResult<()> {
@@ -229,7 +230,7 @@ impl Document {
         })
     }
 
-    fn save<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
+    fn save<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let inner = self
             .inner
             .read()
@@ -240,7 +241,7 @@ impl Document {
             ));
         }
 
-        Ok(PyBytes::new(py, &inner.doc.save()))
+        Ok(PyBytes::new_bound(py, &inner.doc.save()))
     }
 
     #[staticmethod]
@@ -476,12 +477,12 @@ impl Transaction {
         Ok(self.clone())
     }
 
-    #[pyo3(name = "__exit__")]
+    #[pyo3(name = "__exit__", signature = (exc_type=None, exc_value=None, traceback=None))]
     fn exit(
         &self,
-        exc_type: Option<&PyAny>,
-        exc_value: Option<&PyAny>,
-        traceback: Option<&PyAny>,
+        exc_type: Option<Bound<'_, PyAny>>,
+        exc_value: Option<Bound<'_, PyAny>>,
+        traceback: Option<Bound<'_, PyAny>>,
     ) -> PyResult<()> {
         let mut inner = self
             .inner
@@ -575,7 +576,7 @@ impl Transaction {
         obj_id: PyObjId,
         prop: PyProp,
         value_type: &PyScalarType,
-        value: &PyAny,
+        value: Bound<'_, PyAny>,
     ) -> PyResult<()> {
         let mut inner = self
             .inner
@@ -611,7 +612,7 @@ impl Transaction {
         obj_id: PyObjId,
         index: usize,
         value_type: &PyScalarType,
-        value: &PyAny,
+        value: Bound<'_, PyAny>,
     ) -> PyResult<()> {
         let mut inner = self
             .inner
@@ -673,7 +674,7 @@ impl Transaction {
         end: usize,
         name: &str,
         value_type: &PyScalarType,
-        value: &PyAny,
+        value: Bound<'_, PyAny>,
         expand: &PyExpandMark,
     ) -> PyResult<()> {
         let mut inner = self
@@ -712,11 +713,14 @@ impl Transaction {
     }
 }
 
-fn datetime_to_timestamp(datetime: &PyDateTime) -> PyResult<i64> {
+fn datetime_to_timestamp(datetime: Bound<'_, PyDateTime>) -> PyResult<i64> {
     Ok((datetime.call_method0("timestamp")?.extract::<f64>()? * 1000.0).round() as i64)
 }
 
-fn import_scalar(value: &PyAny, scalar_type: &PyScalarType) -> Result<ScalarValue, PyErr> {
+fn import_scalar(
+    value: Bound<'_, PyAny>,
+    scalar_type: &PyScalarType,
+) -> Result<ScalarValue, PyErr> {
     Ok(match scalar_type {
         PyScalarType::Bytes => ScalarValue::Bytes(value.extract::<&[u8]>()?.to_owned()),
         PyScalarType::Str => ScalarValue::Str(value.extract::<String>()?.into()),
@@ -724,9 +728,9 @@ fn import_scalar(value: &PyAny, scalar_type: &PyScalarType) -> Result<ScalarValu
         PyScalarType::Uint => ScalarValue::Uint(value.extract::<u64>()?),
         PyScalarType::F64 => ScalarValue::F64(value.extract::<f64>()?),
         PyScalarType::Counter => todo!(),
-        PyScalarType::Timestamp => {
-            ScalarValue::Timestamp(datetime_to_timestamp(value.downcast::<PyDateTime>()?)?)
-        }
+        PyScalarType::Timestamp => ScalarValue::Timestamp(datetime_to_timestamp(
+            value.downcast::<PyDateTime>()?.clone(),
+        )?),
         PyScalarType::Boolean => ScalarValue::Boolean(value.extract::<bool>()?),
         PyScalarType::Unknown => todo!(),
         PyScalarType::Null => ScalarValue::Null,
@@ -759,8 +763,8 @@ struct PyMessage(am::sync::Message);
 
 #[pymethods]
 impl PyMessage {
-    pub fn encode<'py>(&self, py: Python<'py>) -> &'py PyBytes {
-        PyBytes::new(py, &self.0.clone().encode())
+    pub fn encode<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new_bound(py, &self.0.clone().encode())
     }
 
     #[staticmethod]
@@ -772,13 +776,13 @@ impl PyMessage {
 }
 
 #[pyfunction]
-fn random_actor_id<'py>(py: Python<'py>) -> &'py PyBytes {
-    PyBytes::new(py, ActorId::random().to_bytes())
+fn random_actor_id<'py>(py: Python<'py>) -> Bound<'py, PyBytes> {
+    PyBytes::new_bound(py, ActorId::random().to_bytes())
 }
 
 /// A Python module implemented in Rust.
 #[pymodule]
-fn _automerge(_py: Python, m: &PyModule) -> PyResult<()> {
+fn _automerge(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Classes
     m.add_class::<Document>()?;
     m.add_class::<Transaction>()?;
@@ -789,20 +793,33 @@ fn _automerge(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyObjType>()?;
     m.add_class::<PyScalarType>()?;
     m.add_class::<PyExpandMark>()?;
+    // m.add_class::<PyActionType>()?;
 
     // Constants
     m.add("ROOT", PyObjId(am::ROOT))?;
 
     // Functions
     m.add_function(wrap_pyfunction!(random_actor_id, m)?)?;
+
+    // Submodule
+    let submodule = PyModule::new_bound(py, "patch_action")?;
+    submodule.add_class::<PutMap>()?;
+    submodule.add_class::<PutSeq>()?;
+    submodule.add_class::<Increment>()?;
+    submodule.add_class::<Insert>()?;
+    submodule.add_class::<Conflict>()?;
+    submodule.add_class::<DeleteMap>()?;
+    submodule.add_class::<DeleteSeq>()?;
+    submodule.add_class::<MarkAction>()?;
+    m.add_submodule(&submodule)?;
     Ok(())
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PyProp(Prop);
 
 impl<'a> FromPyObject<'a> for PyProp {
-    fn extract(prop: &'a PyAny) -> PyResult<Self> {
+    fn extract_bound(prop: &Bound<'a, PyAny>) -> PyResult<Self> {
         Ok(PyProp(match prop.extract::<String>() {
             Ok(s) => Prop::Map(s),
             Err(_) => match prop.extract::<usize>() {
@@ -813,11 +830,20 @@ impl<'a> FromPyObject<'a> for PyProp {
     }
 }
 
-#[derive(Debug)]
+impl IntoPy<PyObject> for PyProp {
+    fn into_py(self, py: Python<'_>) -> PyObject {
+        match self.0 {
+            am::Prop::Map(s) => s.into_py(py),
+            am::Prop::Seq(i) => i.into_py(py),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct PyObjId(am::ObjId);
 
 impl<'a> FromPyObject<'a> for PyObjId {
-    fn extract(prop: &'a PyAny) -> PyResult<Self> {
+    fn extract_bound(prop: &Bound<'a, PyAny>) -> PyResult<Self> {
         prop.extract::<&[u8]>()
             .and_then(|b| am::ObjId::try_from(b).map_err(|e| PyException::new_err(e.to_string())))
             .map(PyObjId)
@@ -835,7 +861,7 @@ impl IntoPy<PyObject> for PyObjId {
 pub struct PyChangeHash(am::ChangeHash);
 
 impl<'a> FromPyObject<'a> for PyChangeHash {
-    fn extract(v: &'a PyAny) -> PyResult<Self> {
+    fn extract_bound(v: &Bound<'a, PyAny>) -> PyResult<Self> {
         v.extract::<&[u8]>()
             .and_then(|b| {
                 am::ChangeHash::try_from(b).map_err(|e| PyException::new_err(e.to_string()))
@@ -850,8 +876,8 @@ impl IntoPy<PyObject> for PyChangeHash {
     }
 }
 
-#[derive(Debug)]
-#[pyclass(name = "ObjType")]
+#[derive(Debug, Clone, PartialEq)]
+#[pyclass(name = "ObjType", eq, eq_int)]
 pub enum PyObjType {
     Map,
     List,
@@ -879,8 +905,8 @@ impl Into<ObjType> for &PyObjType {
     }
 }
 
-#[derive(Debug, Clone)]
-#[pyclass(name = "ScalarType")]
+#[derive(Debug, Clone, PartialEq)]
+#[pyclass(name = "ScalarType", eq, eq_int)]
 pub enum PyScalarType {
     Bytes,
     Str,
@@ -907,7 +933,7 @@ impl IntoPy<PyObject> for PyScalarValue {
             ScalarValue::Counter(v) => todo!(),
             ScalarValue::Timestamp(v) => (
                 PyScalarType::Timestamp,
-                PyDateTime::from_timestamp(py, (v as f64) / 1000.0, None)
+                PyDateTime::from_timestamp_bound(py, (v as f64) / 1000.0, None)
                     .unwrap()
                     .into_py(py),
             ),
@@ -920,13 +946,13 @@ impl IntoPy<PyObject> for PyScalarValue {
 }
 
 impl<'a> FromPyObject<'a> for PyScalarValue {
-    fn extract(v: &'a PyAny) -> PyResult<Self> {
-        v.extract::<(PyScalarType, &PyAny)>()
+    fn extract_bound(v: &Bound<'a, PyAny>) -> PyResult<Self> {
+        v.extract::<(PyScalarType, Bound<'a, PyAny>)>()
             .and_then(|(t, v)| import_scalar(v, &t).map(|v| PyScalarValue(v)))
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PyValue<'a>(am::Value<'a>);
 
 impl<'a> IntoPy<PyObject> for PyValue<'a> {
@@ -939,7 +965,7 @@ impl<'a> IntoPy<PyObject> for PyValue<'a> {
 }
 
 #[pyclass(name = "Mark", get_all, set_all)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PyMark {
     start: usize,
     end: usize,
@@ -1033,13 +1059,13 @@ impl PyChange {
     }
 
     #[getter]
-    fn timestamp<'py>(&self, py: Python<'py>) -> PyResult<&'py PyDateTime> {
-        PyDateTime::from_timestamp(py, (self.0.timestamp() as f64) / 1000.0, None)
+    fn timestamp<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDateTime>> {
+        PyDateTime::from_timestamp_bound(py, (self.0.timestamp() as f64) / 1000.0, None)
     }
 
     #[getter]
-    fn bytes<'py>(&mut self, py: Python<'py>) -> &'py PyBytes {
-        PyBytes::new(py, self.0.bytes().as_ref())
+    fn bytes<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new_bound(py, self.0.bytes().as_ref())
     }
 
     #[getter]
@@ -1062,4 +1088,260 @@ impl PyPatch {
     fn __repr__(&self) -> String {
         format!("{:?}", self.0)
     }
+
+    #[getter]
+    fn obj(&self) -> PyObjId {
+        PyObjId(self.0.obj.clone())
+    }
+
+    #[getter]
+    fn path(&self) -> Vec<(PyObjId, PyProp)> {
+        self.0
+            .path
+            .iter()
+            .map(|(obj, prop)| (PyObjId(obj.clone()), PyProp(prop.clone())))
+            .collect()
+    }
+    #[getter]
+    fn action(&self, py: Python<'_>) -> PyObject {
+        let action: PyActionType = self.0.action.clone().into();
+        match action {
+            PyActionType::Conflict(v) => v.into_py(py),
+            PyActionType::DeleteMap(v) => v.into_py(py),
+            PyActionType::DeleteSeq(v) => v.into_py(py),
+            PyActionType::Increment(v) => v.into_py(py),
+            PyActionType::Insert(v) => v.into_py(py),
+            PyActionType::Mark(v) => v.into_py(py),
+            PyActionType::PutMap(v) => v.into_py(py),
+            PyActionType::PutSeq(v) => v.into_py(py),
+            PyActionType::SpliceText(v) => v.into_py(py),
+        }
+    }
 }
+
+impl From<am::PatchAction> for PyActionType {
+    fn from(value: am::PatchAction) -> PyActionType {
+        match value {
+            am::PatchAction::PutMap {
+                key,
+                value,
+                conflict,
+            } => PyActionType::PutMap(PutMap {
+                key: key.clone(),
+                value: (PyValue(value.0.clone()), PyObjId(value.1.clone())),
+                conflict: conflict,
+            }),
+
+            am::PatchAction::PutSeq {
+                index,
+                value,
+                conflict,
+            } => PyActionType::PutSeq(PutSeq {
+                index: index,
+                value: (PyValue(value.0.clone()), PyObjId(value.1.clone())),
+                conflict: conflict,
+            }),
+            am::PatchAction::Insert { index, values } => {
+                let values: Vec<_> = values
+                    .iter()
+                    .map(|(v, oid, b)| (PyValue(v.clone()), PyObjId(oid.clone()), *b))
+                    .collect();
+
+                PyActionType::Insert(Insert {
+                    index: index,
+                    values: values,
+                })
+            }
+            am::PatchAction::SpliceText {
+                index,
+                value,
+                marks,
+            } => {
+                let marks = match marks {
+                    Some(marks) => {
+                        let marks: BTreeMap<String, PyScalarValue> = marks
+                            .iter()
+                            .map(|(key, value)| (key.to_string(), PyScalarValue(value.clone())))
+                            .collect();
+                        Some(marks)
+                    }
+                    None => None,
+                };
+
+                PyActionType::SpliceText(SpliceText {
+                    index: index,
+                    value: value.make_string(),
+                    marks: marks,
+                })
+            }
+            am::PatchAction::Increment { prop, value } => PyActionType::Increment(Increment {
+                prop: PyProp(prop.clone()),
+                value: value,
+            }),
+            am::PatchAction::Conflict { prop } => PyActionType::Conflict(Conflict {
+                prop: PyProp(prop.clone()),
+            }),
+            am::PatchAction::DeleteMap { key } => {
+                PyActionType::DeleteMap(DeleteMap { key: key.clone() })
+            }
+            am::PatchAction::DeleteSeq { index, length } => PyActionType::DeleteSeq(DeleteSeq {
+                index: index,
+                length: length,
+            }),
+            am::PatchAction::Mark { marks } => PyActionType::Mark(MarkAction {
+                marks: marks
+                    .iter()
+                    .map(|m| PyMark {
+                        start: m.start,
+                        end: m.end,
+                        name: m.name().to_owned(),
+                        value: PyScalarValue(m.value().clone()),
+                    })
+                    .collect(),
+            }),
+        }
+    }
+}
+
+/// Enum to represent the possible actions in `PyPatchAction`.
+
+pub enum PyActionType {
+    Conflict(Conflict),
+    DeleteMap(DeleteMap),
+    DeleteSeq(DeleteSeq),
+    Increment(Increment),
+    Insert(Insert),
+    Mark(MarkAction),
+    PutMap(PutMap),
+    PutSeq(PutSeq),
+    SpliceText(SpliceText),
+}
+
+/// Individual struct for `PutMap`.
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct PutMap {
+    #[pyo3(get)]
+    pub key: String,
+    #[pyo3(get)]
+    pub value: (PyValue<'static>, PyObjId),
+    #[pyo3(get)]
+    pub conflict: bool,
+}
+
+/// Individual struct for `PutSeq`.
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct PutSeq {
+    #[pyo3(get)]
+    pub index: usize,
+    #[pyo3(get)]
+    pub value: (PyValue<'static>, PyObjId),
+    #[pyo3(get)]
+    pub conflict: bool,
+}
+
+/// Struct for `Increment`.
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct Increment {
+    #[pyo3(get)]
+    pub prop: PyProp,
+    #[pyo3(get)]
+    pub value: i64,
+}
+
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct Insert {
+    #[pyo3(get)]
+    index: usize,
+    #[pyo3(get)]
+    values: Vec<(PyValue<'static>, PyObjId, bool)>,
+}
+
+/// Struct for `Conflict`.
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct Conflict {
+    #[pyo3(get)]
+    pub prop: PyProp,
+}
+
+/// Struct for `DeleteMap`.
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct DeleteMap {
+    #[pyo3(get)]
+    pub key: String,
+}
+
+/// Struct for `DeleteSeq`.
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct DeleteSeq {
+    #[pyo3(get)]
+    pub index: usize,
+    #[pyo3(get)]
+    pub length: usize,
+}
+
+/// Struct for `Mark`.
+#[pyclass(name = "Mark")]
+#[derive(Debug, Clone)]
+pub struct MarkAction {
+    #[pyo3(get)]
+    pub marks: Vec<PyMark>,
+}
+
+#[pyclass]
+#[derive(Debug, Clone)]
+pub struct SpliceText {
+    #[pyo3(get)]
+    index: usize,
+    #[pyo3(get)]
+    value: String,
+    #[pyo3(get)]
+    marks: Option<BTreeMap<String, PyScalarValue>>,
+}
+
+macro_rules! impl_repr {
+    ( $( $struct_name:ident { $( $field:ident ),* } ),* ) => {
+        $(
+            #[pymethods]
+            impl $struct_name {
+                pub fn __repr__(slf: &Bound<'_, Self>) -> PyResult<String> {
+                    let class_name: Bound<'_, pyo3::types::PyString> = slf.get_type().qualname()?;
+                    let fields: Vec<String> = vec![
+                        $(
+                            format!("{}: {:?}", stringify!($field), (&slf.borrow()).$field)
+                        ),*
+                    ];
+                    let values = fields.join(", ");
+
+                    Ok(format!("{}({})", class_name, values))
+                }
+            }
+        )*
+    };
+}
+
+impl_repr!(
+    Conflict { prop },
+    DeleteMap { key },
+    DeleteSeq { index, length },
+    Increment { prop, value },
+    Insert { index, values },
+    MarkAction { marks },
+    PutMap {
+        key,
+        value,
+        conflict
+    },
+    PutSeq {
+        index,
+        value,
+        conflict
+    },
+    SpliceText { index, value }
+);
