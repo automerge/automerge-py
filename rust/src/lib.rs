@@ -480,15 +480,15 @@ impl Transaction {
     fn exit(
         &self,
         exc_type: Option<&PyAny>,
-        exc_value: Option<&PyAny>,
-        traceback: Option<&PyAny>,
+        _exc_value: Option<&PyAny>,
+        _traceback: Option<&PyAny>,
     ) -> PyResult<()> {
         let mut inner = self
             .inner
             .write()
             .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
         if let Some(tx) = inner.tx.take() {
-            if let Some(exc_type) = exc_type {
+            if let Some(_exc_type) = exc_type {
                 tx.rollback();
             } else {
                 tx.commit();
@@ -894,7 +894,7 @@ impl IntoPy<PyObject> for PyScalarValue {
             ScalarValue::Int(v) => (PyScalarType::Int, v.into_py(py)),
             ScalarValue::Uint(v) => (PyScalarType::Uint, v.into_py(py)),
             ScalarValue::F64(v) => (PyScalarType::F64, v.into_py(py)),
-            ScalarValue::Counter(v) => todo!(),
+            ScalarValue::Counter(_v) => todo!(),
             ScalarValue::Timestamp(v) => (
                 PyScalarType::Timestamp,
                 PyDateTime::from_timestamp(py, (v as f64) / 1000.0, None)
@@ -902,7 +902,7 @@ impl IntoPy<PyObject> for PyScalarValue {
                     .into_py(py),
             ),
             ScalarValue::Boolean(v) => (PyScalarType::Boolean, v.into_py(py)),
-            ScalarValue::Unknown { type_code, bytes } => todo!(),
+            ScalarValue::Unknown { type_code: _, bytes: _ } => todo!(),
             ScalarValue::Null => (PyScalarType::Null, Python::None(py)),
         }
         .into_py(py)
