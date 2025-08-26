@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Union, Dict, List, Tuple
 from .. import _automerge
 from .._automerge import *
+from .._automerge import ObjType, ScalarType, ROOT, Document
 
 ScalarValue = Union[str, bytes, int, float, bool, datetime, None]
 Thing = Union[Dict[str, 'Thing'], List['Thing'], ScalarValue]

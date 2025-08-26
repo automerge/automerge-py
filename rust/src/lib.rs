@@ -14,7 +14,7 @@ use am::{
 use pyo3::{
     exceptions::PyException,
     prelude::*,
-    types::{PyBytes, PyDateTime},
+    types::{PyBool, PyBytes, PyDateTime, PyTuple},
 };
 
 struct Inner {
@@ -171,6 +171,7 @@ struct Document {
 #[pymethods]
 impl Document {
     #[new]
+    #[pyo3(signature=(actor_id=None))]
     fn new(actor_id: Option<&[u8]>) -> Self {
         let mut doc = am::Automerge::new();
         if let Some(id) = actor_id {
@@ -181,7 +182,7 @@ impl Document {
         }
     }
 
-    fn get_actor<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
+    fn get_actor<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let inner = self
             .inner
             .read()
@@ -229,7 +230,7 @@ impl Document {
         })
     }
 
-    fn save<'py>(&self, py: Python<'py>) -> PyResult<&'py PyBytes> {
+    fn save<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let inner = self
             .inner
             .read()
@@ -251,6 +252,7 @@ impl Document {
         })
     }
 
+    #[pyo3(signature=(heads=None))]
     fn fork(&self, heads: Option<Vec<PyChangeHash>>) -> PyResult<Document> {
         let inner = self
             .inner
@@ -405,12 +407,13 @@ impl Document {
             .collect())
     }
 
+    #[pyo3(signature=(obj_id, prop, heads=None))]
     fn get(
         &self,
         obj_id: PyObjId,
         prop: PyProp,
         heads: Option<Vec<PyChangeHash>>,
-    ) -> PyResult<Option<(PyValue, PyObjId)>> {
+    ) -> PyResult<Option<(PyValue<'_>, PyObjId)>> {
         let inner = self
             .inner
             .read()
@@ -418,6 +421,7 @@ impl Document {
         inner.get(obj_id, prop, heads)
     }
 
+    #[pyo3(signature=(obj_id, heads=None))]
     fn keys(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<String>> {
         let inner = self
             .inner
@@ -426,11 +430,12 @@ impl Document {
         inner.keys(obj_id, heads)
     }
 
+    #[pyo3(signature=(obj_id, heads=None))]
     fn values(
         &self,
         obj_id: PyObjId,
         heads: Option<Vec<PyChangeHash>>,
-    ) -> PyResult<Vec<(PyValue, PyObjId)>> {
+    ) -> PyResult<Vec<(PyValue<'_>, PyObjId)>> {
         let inner = self
             .inner
             .read()
@@ -438,6 +443,7 @@ impl Document {
         inner.values(obj_id, heads)
     }
 
+    #[pyo3(signature=(obj_id, heads=None))]
     fn length(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<usize> {
         let inner = self
             .inner
@@ -446,6 +452,7 @@ impl Document {
         Ok(inner.length(obj_id, heads))
     }
 
+    #[pyo3(signature=(obj_id, heads=None))]
     fn text(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<String> {
         let inner = self
             .inner
@@ -454,6 +461,7 @@ impl Document {
         inner.text(obj_id, heads)
     }
 
+    #[pyo3(signature=(obj_id, heads=None))]
     fn marks(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<PyMark>> {
         let inner = self
             .inner
@@ -479,9 +487,9 @@ impl Transaction {
     #[pyo3(name = "__exit__")]
     fn exit(
         &self,
-        exc_type: Option<&PyAny>,
-        _exc_value: Option<&PyAny>,
-        _traceback: Option<&PyAny>,
+        exc_type: Option<&Bound<'_, PyAny>>,
+        _exc_value: Option<&Bound<'_, PyAny>>,
+        _traceback: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<()> {
         let mut inner = self
             .inner
@@ -513,12 +521,13 @@ impl Transaction {
         inner.object_type(obj_id)
     }
 
+    #[pyo3(signature=(obj_id, prop, heads=None))]
     fn get(
         &self,
         obj_id: PyObjId,
         prop: PyProp,
         heads: Option<Vec<PyChangeHash>>,
-    ) -> PyResult<Option<(PyValue, PyObjId)>> {
+    ) -> PyResult<Option<(PyValue<'_>, PyObjId)>> {
         let inner = self
             .inner
             .read()
@@ -526,6 +535,7 @@ impl Transaction {
         inner.get(obj_id, prop, heads)
     }
 
+    #[pyo3(signature=(obj_id, heads=None))]
     fn keys(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<String>> {
         let inner = self
             .inner
@@ -534,11 +544,12 @@ impl Transaction {
         inner.keys(obj_id, heads)
     }
 
+    #[pyo3(signature=(obj_id, heads=None))]
     fn values(
         &self,
         obj_id: PyObjId,
         heads: Option<Vec<PyChangeHash>>,
-    ) -> PyResult<Vec<(PyValue, PyObjId)>> {
+    ) -> PyResult<Vec<(PyValue<'_>, PyObjId)>> {
         let inner = self
             .inner
             .read()
@@ -546,6 +557,7 @@ impl Transaction {
         inner.values(obj_id, heads)
     }
 
+    #[pyo3(signature=(obj_id, heads=None))]
     fn length(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<usize> {
         let inner = self
             .inner
@@ -554,6 +566,7 @@ impl Transaction {
         Ok(inner.length(obj_id, heads))
     }
 
+    #[pyo3(signature=(obj_id, heads=None))]
     fn text(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<String> {
         let inner = self
             .inner
@@ -562,6 +575,7 @@ impl Transaction {
         inner.text(obj_id, heads)
     }
 
+    #[pyo3(signature=(obj_id, heads=None))]
     fn marks(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<PyMark>> {
         let inner = self
             .inner
@@ -575,7 +589,7 @@ impl Transaction {
         obj_id: PyObjId,
         prop: PyProp,
         value_type: &PyScalarType,
-        value: &PyAny,
+        value: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
         let mut inner = self
             .inner
@@ -611,7 +625,7 @@ impl Transaction {
         obj_id: PyObjId,
         index: usize,
         value_type: &PyScalarType,
-        value: &PyAny,
+        value: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
         let mut inner = self
             .inner
@@ -673,8 +687,8 @@ impl Transaction {
         end: usize,
         name: &str,
         value_type: &PyScalarType,
-        value: &PyAny,
-        expand: &PyExpandMark,
+        value: &Bound<'_, PyAny>,
+        expand: &Bound<'_, PyExpandMark>,
     ) -> PyResult<()> {
         let mut inner = self
             .inner
@@ -687,7 +701,7 @@ impl Transaction {
         tx.mark(
             obj_id.0,
             Mark::new(name.to_owned(), value, start, end),
-            expand.into(),
+            (&*expand.borrow()).into(),
         )
         .map_err(|e| PyException::new_err(e.to_string()))
     }
@@ -712,11 +726,14 @@ impl Transaction {
     }
 }
 
-fn datetime_to_timestamp(datetime: &PyDateTime) -> PyResult<i64> {
+fn datetime_to_timestamp(datetime: &Bound<'_, PyDateTime>) -> PyResult<i64> {
     Ok((datetime.call_method0("timestamp")?.extract::<f64>()? * 1000.0).round() as i64)
 }
 
-fn import_scalar(value: &PyAny, scalar_type: &PyScalarType) -> Result<ScalarValue, PyErr> {
+fn import_scalar(
+    value: &Bound<'_, PyAny>,
+    scalar_type: &PyScalarType,
+) -> Result<ScalarValue, PyErr> {
     Ok(match scalar_type {
         PyScalarType::Bytes => ScalarValue::Bytes(value.extract::<&[u8]>()?.to_owned()),
         PyScalarType::Str => ScalarValue::Str(value.extract::<String>()?.into()),
@@ -749,7 +766,7 @@ struct PyMessage(am::sync::Message);
 
 #[pymethods]
 impl PyMessage {
-    pub fn encode<'py>(&self, py: Python<'py>) -> &'py PyBytes {
+    pub fn encode<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
         PyBytes::new(py, &self.0.clone().encode())
     }
 
@@ -762,13 +779,13 @@ impl PyMessage {
 }
 
 #[pyfunction]
-fn random_actor_id<'py>(py: Python<'py>) -> &'py PyBytes {
+fn random_actor_id<'py>(py: Python<'py>) -> Bound<'py, PyBytes> {
     PyBytes::new(py, ActorId::random().to_bytes())
 }
 
 /// A Python module implemented in Rust.
 #[pymodule]
-fn _automerge(_py: Python, m: &PyModule) -> PyResult<()> {
+fn _automerge(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Classes
     m.add_class::<Document>()?;
     m.add_class::<Transaction>()?;
@@ -785,6 +802,7 @@ fn _automerge(_py: Python, m: &PyModule) -> PyResult<()> {
 
     // Functions
     m.add_function(wrap_pyfunction!(random_actor_id, m)?)?;
+
     Ok(())
 }
 
@@ -792,7 +810,7 @@ fn _automerge(_py: Python, m: &PyModule) -> PyResult<()> {
 pub struct PyProp(Prop);
 
 impl<'a> FromPyObject<'a> for PyProp {
-    fn extract(prop: &'a PyAny) -> PyResult<Self> {
+    fn extract_bound(prop: &Bound<'a, PyAny>) -> PyResult<Self> {
         Ok(PyProp(match prop.extract::<String>() {
             Ok(s) => Prop::Map(s),
             Err(_) => match prop.extract::<usize>() {
@@ -807,17 +825,21 @@ impl<'a> FromPyObject<'a> for PyProp {
 pub struct PyObjId(am::ObjId);
 
 impl<'a> FromPyObject<'a> for PyObjId {
-    fn extract(prop: &'a PyAny) -> PyResult<Self> {
+    fn extract_bound(prop: &Bound<'a, PyAny>) -> PyResult<Self> {
         prop.extract::<&[u8]>()
             .and_then(|b| am::ObjId::try_from(b).map_err(|e| PyException::new_err(e.to_string())))
             .map(PyObjId)
     }
 }
 
-impl IntoPy<PyObject> for PyObjId {
-    fn into_py(self, py: Python<'_>) -> PyObject {
+impl<'py> IntoPyObject<'py> for PyObjId {
+    type Target = PyBytes;
+    type Error = PyErr;
+    type Output = Bound<'py, Self::Target>;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
         let bytes: &[u8] = &self.0.to_bytes();
-        bytes.into_py(py)
+        Ok(PyBytes::new(py, bytes))
     }
 }
 
@@ -825,7 +847,7 @@ impl IntoPy<PyObject> for PyObjId {
 pub struct PyChangeHash(am::ChangeHash);
 
 impl<'a> FromPyObject<'a> for PyChangeHash {
-    fn extract(v: &'a PyAny) -> PyResult<Self> {
+    fn extract_bound(v: &Bound<'a, PyAny>) -> PyResult<Self> {
         v.extract::<&[u8]>()
             .and_then(|b| {
                 am::ChangeHash::try_from(b).map_err(|e| PyException::new_err(e.to_string()))
@@ -834,14 +856,18 @@ impl<'a> FromPyObject<'a> for PyChangeHash {
     }
 }
 
-impl IntoPy<PyObject> for PyChangeHash {
-    fn into_py(self, py: Python<'_>) -> PyObject {
-        self.0.as_ref().into_py(py)
+impl<'py> IntoPyObject<'py> for PyChangeHash {
+    type Target = PyBytes;
+    type Error = PyErr;
+    type Output = Bound<'py, Self::Target>;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        Ok(PyBytes::new(py, self.0.as_ref()))
     }
 }
 
-#[derive(Debug)]
-#[pyclass(name = "ObjType")]
+#[derive(Debug, PartialEq, Eq)]
+#[pyclass(name = "ObjType", eq, eq_int)]
 pub enum PyObjType {
     Map,
     List,
@@ -852,7 +878,7 @@ impl PyObjType {
     fn from_objtype(objtype: ObjType) -> PyObjType {
         match objtype {
             ObjType::Map => PyObjType::Map,
-            ObjType::Table => todo!(),
+            ObjType::Table => PyObjType::Map,
             ObjType::List => PyObjType::List,
             ObjType::Text => PyObjType::Text,
         }
@@ -869,8 +895,8 @@ impl Into<ObjType> for &PyObjType {
     }
 }
 
-#[derive(Debug, Clone)]
-#[pyclass(name = "ScalarType")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[pyclass(name = "ScalarType", eq, eq_int)]
 pub enum PyScalarType {
     Bytes,
     Str,
@@ -886,44 +912,63 @@ pub enum PyScalarType {
 
 #[derive(Debug, Clone)]
 pub struct PyScalarValue(am::ScalarValue);
-impl IntoPy<PyObject> for PyScalarValue {
-    fn into_py(self, py: Python<'_>) -> PyObject {
+impl<'py> IntoPyObject<'py> for PyScalarValue {
+    type Target = PyTuple;
+    type Error = PyErr;
+    type Output = Bound<'py, Self::Target>;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
         match self.0 {
-            ScalarValue::Bytes(v) => (PyScalarType::Bytes, v.into_py(py)),
-            ScalarValue::Str(v) => (PyScalarType::Str, v.into_py(py)),
-            ScalarValue::Int(v) => (PyScalarType::Int, v.into_py(py)),
-            ScalarValue::Uint(v) => (PyScalarType::Uint, v.into_py(py)),
-            ScalarValue::F64(v) => (PyScalarType::F64, v.into_py(py)),
+            ScalarValue::Bytes(v) => (PyScalarType::Bytes, v.into_pyobject(py)?),
+            ScalarValue::Str(v) => (PyScalarType::Str, v.into_pyobject(py)?.into_any()),
+            ScalarValue::Int(v) => (PyScalarType::Int, v.into_pyobject(py)?.into_any()),
+            ScalarValue::Uint(v) => (PyScalarType::Uint, v.into_pyobject(py)?.into_any()),
+            ScalarValue::F64(v) => (PyScalarType::F64, v.into_pyobject(py)?.into_any()),
             ScalarValue::Counter(_v) => todo!(),
             ScalarValue::Timestamp(v) => (
                 PyScalarType::Timestamp,
                 PyDateTime::from_timestamp(py, (v as f64) / 1000.0, None)
                     .unwrap()
-                    .into_py(py),
+                    .into_pyobject(py)?
+                    .into_any(),
             ),
-            ScalarValue::Boolean(v) => (PyScalarType::Boolean, v.into_py(py)),
-            ScalarValue::Unknown { type_code: _, bytes: _ } => todo!(),
-            ScalarValue::Null => (PyScalarType::Null, Python::None(py)),
+            ScalarValue::Boolean(v) => (
+                PyScalarType::Boolean,
+                PyBool::new(py, v).to_owned().into_any(),
+            ),
+            ScalarValue::Unknown {
+                type_code: _,
+                bytes: _,
+            } => todo!(),
+            ScalarValue::Null => (PyScalarType::Null, py.None().bind(py).to_owned().into_any()),
         }
-        .into_py(py)
+        .into_pyobject(py)
     }
 }
 
 impl<'a> FromPyObject<'a> for PyScalarValue {
-    fn extract(v: &'a PyAny) -> PyResult<Self> {
-        v.extract::<(PyScalarType, &PyAny)>()
-            .and_then(|(t, v)| import_scalar(v, &t).map(|v| PyScalarValue(v)))
+    fn extract_bound(v: &Bound<'a, PyAny>) -> PyResult<Self> {
+        v.extract::<(PyScalarType, Bound<'a, PyAny>)>()
+            .and_then(|(t, v)| import_scalar(&v, &t).map(|v| PyScalarValue(v)))
     }
 }
 
 #[derive(Debug)]
 pub struct PyValue<'a>(am::Value<'a>);
 
-impl<'a> IntoPy<PyObject> for PyValue<'a> {
-    fn into_py(self, py: Python<'_>) -> PyObject {
+impl<'a, 'py> IntoPyObject<'py> for PyValue<'a> {
+    type Target = PyAny;
+    type Error = PyErr;
+    type Output = Bound<'py, Self::Target>;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
         match self.0 {
-            am::Value::Object(objtype) => PyObjType::from_objtype(objtype).into_py(py),
-            am::Value::Scalar(s) => PyScalarValue(s.as_ref().clone()).into_py(py),
+            am::Value::Object(objtype) => Ok(PyObjType::from_objtype(objtype)
+                .into_pyobject(py)?
+                .into_any()),
+            am::Value::Scalar(s) => Ok(PyScalarValue(s.as_ref().clone())
+                .into_pyobject(py)?
+                .into_any()),
         }
     }
 }
@@ -1023,12 +1068,12 @@ impl PyChange {
     }
 
     #[getter]
-    fn timestamp<'py>(&self, py: Python<'py>) -> PyResult<&'py PyDateTime> {
+    fn timestamp<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDateTime>> {
         PyDateTime::from_timestamp(py, (self.0.timestamp() as f64) / 1000.0, None)
     }
 
     #[getter]
-    fn bytes<'py>(&mut self, py: Python<'py>) -> &'py PyBytes {
+    fn bytes<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyBytes> {
         PyBytes::new(py, self.0.bytes().as_ref())
     }
 
