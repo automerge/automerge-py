@@ -724,6 +724,24 @@ impl Transaction {
         tx.unmark(obj_id.0, name, start, end, expand.into())
             .map_err(|e| PyException::new_err(e.to_string()))
     }
+
+    fn splice_text(
+        &mut self,
+        obj_id: PyObjId,
+        pos: usize,
+        delete_count: isize,
+        text: &str,
+    ) -> PyResult<()> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
+        let Some(tx) = inner.tx.as_mut() else {
+            return Err(PyException::new_err("transaction no longer active"));
+        };
+        tx.splice_text(obj_id.0, pos, delete_count, text)
+            .map_err(|e| PyException::new_err(e.to_string()))
+    }
 }
 
 fn datetime_to_timestamp(datetime: &Bound<'_, PyDateTime>) -> PyResult<i64> {
