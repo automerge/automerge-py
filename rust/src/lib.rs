@@ -317,11 +317,7 @@ impl Document {
         let after_heads: Vec<ChangeHash> = after_heads.iter().map(|h| h.0).collect();
         Ok(inner
             .doc
-            .diff(
-                &before_heads,
-                &after_heads,
-                am::patches::TextRepresentation::Array,
-            )
+            .diff(&before_heads, &after_heads)
             .into_iter()
             .map(|p| PyPatch(p))
             .collect())
