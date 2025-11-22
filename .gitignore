@@ -2,3 +2,4 @@ env/
 target/
 __pycache__/
 *.so
+uv.lock
