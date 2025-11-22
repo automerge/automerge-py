@@ -12,6 +12,23 @@ classifiers = [
 ]
 dynamic = ["version"]
 
+# Optional dependencies for additional features
+# Install with: pip install automerge[websocket]
+# Or all extras: pip install automerge[all]
+[project.optional-dependencies]
+websocket = [
+    "websockets>=12.0",
+]
+all = [
+    "websockets>=12.0",
+]
+
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "automerge._automerge"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.23.0",
+]
