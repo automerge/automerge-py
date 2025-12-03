@@ -10,7 +10,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dynamic = ["version"]
+version = "0.2.0.dev1"
 
 # Optional dependencies for additional features
 # Install with: pip install automerge[websocket]
