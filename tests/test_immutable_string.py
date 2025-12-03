@@ -1,4 +1,3 @@
-import pytest
 from automerge import ImmutableString
 
 
