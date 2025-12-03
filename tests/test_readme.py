@@ -1,5 +1,6 @@
 from automerge.core import Document, ROOT, ObjType, ScalarType, extract
 
+
 def test_readme() -> None:
     doc = Document()
     with doc.transaction() as tx:
@@ -15,4 +16,4 @@ def test_readme() -> None:
         tx.delete(list, 0)
 
     doc.merge(doc2)  # `doc` now contains {"colours": ["green", "red"]}
-    assert extract(doc) == {'colours': ['green', 'red']}
+    assert extract(doc) == {"colours": ["green", "red"]}

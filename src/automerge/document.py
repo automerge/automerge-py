@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from contextlib import contextmanager
 from datetime import datetime
 from typing import (
@@ -63,10 +65,6 @@ class ImmutableString(str):
     """
 
     pass
-
-
-# Forward declaration for Text
-class Text: ...
 
 
 ProxyThing = Union[
@@ -139,7 +137,7 @@ class ListReadProxy(ReadProxy, Sequence[ProxyThing]):
         self, key: Union[int, slice]
     ) -> Union[ProxyThing, Sequence[ProxyThing]]:
         if not isinstance(key, int):
-            raise NotImplemented
+            raise NotImplementedError
         x = self._doc.get(self._obj_id, key, self._heads)
         if x is None:
             raise IndexError()
@@ -275,9 +273,9 @@ class WriteProxy:
                 m[k] = dv
         elif isinstance(value, MutableSequence):
             obj_id = self._create_object(key, core.ObjType.List, operation)
-            l = ListWriteProxy(self._tx, obj_id, self._heads)
+            newList = ListWriteProxy(self._tx, obj_id, self._heads)
             for i, lv in enumerate(value):
-                l[i] = lv
+                newList[i] = lv
         elif isinstance(value, MutableText) or isinstance(value, Text):
             str_value = str(value)
             obj_id = self._create_object(key, core.ObjType.Text, operation)
@@ -355,11 +353,7 @@ class WriteProxy:
             raise ValueError(f"Unknown operation: {operation}")
 
 
-
 class TextWriteProxy: ...
-
-
-
 
 
 class MapWriteProxy(WriteProxy, MutableMapping[str, MutableProxyThing]):
@@ -388,7 +382,7 @@ class MapWriteProxy(WriteProxy, MutableMapping[str, MutableProxyThing]):
         self._tx.delete(self._obj_id, key)
 
     def __iter__(self) -> Iterator[str]:
-        raise NotImplemented
+        raise NotImplementedError
 
 
 class ListWriteProxy(WriteProxy, MutableSequence[MutableProxyThing]):
@@ -400,7 +394,7 @@ class ListWriteProxy(WriteProxy, MutableSequence[MutableProxyThing]):
         self, key: Union[int, slice]
     ) -> Union[MutableProxyThing, MutableSequence[MutableProxyThing]]:
         if not isinstance(key, int):
-            raise NotImplemented
+            raise NotImplementedError
         x = self._tx.get(self._obj_id, key, self._heads)
         if x is None:
             return None
@@ -426,7 +420,7 @@ class ListWriteProxy(WriteProxy, MutableSequence[MutableProxyThing]):
         value: Union[MutableProxyThing, Iterable[MutableProxyThing]],
     ) -> None:
         if not isinstance(idx, int):
-            raise NotImplemented
+            raise NotImplementedError
         self._insert_value(idx, value, operation="put_or_insert")
 
     @overload
@@ -435,7 +429,7 @@ class ListWriteProxy(WriteProxy, MutableSequence[MutableProxyThing]):
     def __delitem__(self, idx: slice) -> None: ...
     def __delitem__(self, idx: Union[int, slice]) -> None:
         if not isinstance(idx, int):
-            raise NotImplemented
+            raise NotImplementedError
         self._tx.delete(self._obj_id, idx)
 
     def insert(
@@ -449,12 +443,14 @@ class ListWriteProxy(WriteProxy, MutableSequence[MutableProxyThing]):
         ],
     ) -> None:
         if not isinstance(idx, int):
-            raise NotImplemented
+            raise NotImplementedError
         self._insert_value(idx, value, operation="insert")
 
 
 class MutableText(Text, WriteProxy):
-    def __init__(self, tx: core.Transaction, obj_id: bytes, heads: Optional[List[bytes]]) -> None:
+    def __init__(
+        self, tx: core.Transaction, obj_id: bytes, heads: Optional[List[bytes]]
+    ) -> None:
         WriteProxy.__init__(self, tx, obj_id, heads)
 
     """

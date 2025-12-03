@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import List, Optional, Tuple
-from automerge.core import Document, ROOT, ScalarType, ObjType
+
+from automerge.core import ROOT, Document, ObjType, ScalarType
+
 
 def test_get_changes() -> None:
     doc = Document()
@@ -15,7 +17,7 @@ def test_get_changes() -> None:
     assert len(change) == 1
     assert change.max_op == 1
     assert change.start_op == 1
-    assert change.message == None
+    assert change.message is None
     assert change.deps == []
     assert change.hash is not None
     assert change.seq == 1
@@ -35,9 +37,10 @@ def test_get_changes() -> None:
     assert len(changes) == 1
     assert changes[0].hash == second_change_hash
 
+
 def test_multi_author_changes() -> None:
-    docA = Document(actor_id=b'A')
-    docB = Document(actor_id=b'B')
+    docA = Document(actor_id=b"A")
+    docB = Document(actor_id=b"B")
 
     # First A types something
     with docA.transaction() as tx:
@@ -75,8 +78,8 @@ def test_multi_author_changes() -> None:
     doc = docA
 
     changes = doc.get_changes([])
-    assert changes[0].actor_id == b'A'
-    assert changes[1].actor_id == b'B'
+    assert changes[0].actor_id == b"A"
+    assert changes[1].actor_id == b"B"
 
     last_actor: Optional[bytes] = None
     snapshots: List[Tuple[str, Optional[bytes]]] = []
@@ -94,4 +97,10 @@ def test_multi_author_changes() -> None:
     # We could keep waiting for more changes to come in from the current last
     # actor, but let's say we waited a while and we want to persist now.
     snapshots.append((doc.text(text), last_actor))
-    assert snapshots == [('', None), ('hi', b'A'), ('hi yo', b'B'), ('hi yo 😊', b'A'), ('hi yo 👋 😊', b'B')]
+    assert snapshots == [
+        ("", None),
+        ("hi", b"A"),
+        ("hi yo", b"B"),
+        ("hi yo 😊", b"A"),
+        ("hi yo 👋 😊", b"B"),
+    ]

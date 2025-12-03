@@ -1,6 +1,3 @@
-import pytest
-
-import automerge.core as core
 from automerge import Document, ImmutableString
 
 
@@ -93,16 +90,6 @@ class TestTextCreation:
 
     def test_inserting_write_proxy_in_string(self):
         """Assigning a Text object to a new field creates a Text object"""
-        doc = Document()
-        with doc.change() as d:
-            d["text"] = "hello"
-            d["list"] = []
-            d["list"].insert(0, d["text"])
-            assert d["list"][0] == "hello"
-
-        assert doc["list"][0] == "hello"
-
-    def test_inserting_write_proxy_in_string(self):
         doc = Document()
         with doc.change() as d:
             d["text"] = "hello"
@@ -450,7 +437,10 @@ class TestImmutableStringVsText:
 
     def test_text_inheritance_and_types(self):
         """Verify the inheritance and types of Text and MutableText."""
-        from automerge import Text, MutableText # Import here to avoid circular dependencies if Text is not fully defined yet
+        from automerge import (
+            MutableText,
+            Text,
+        )  # Import here to avoid circular dependencies if Text is not fully defined yet
 
         doc = Document()
         with doc.change() as d:
@@ -467,7 +457,7 @@ class TestImmutableStringVsText:
 
         # Verify MutableText object
         assert isinstance(mutable_text_obj, MutableText)
-        assert isinstance(mutable_text_obj, Text) # Key assertion for inheritance
+        assert isinstance(mutable_text_obj, Text)  # Key assertion for inheritance
 
         # Verify attributes exist on MutableText
         assert hasattr(mutable_text_obj, "insert")
@@ -478,4 +468,3 @@ class TestImmutableStringVsText:
         assert not hasattr(read_text_obj, "insert")
         assert not hasattr(read_text_obj, "delete")
         assert not hasattr(read_text_obj, "splice")
-

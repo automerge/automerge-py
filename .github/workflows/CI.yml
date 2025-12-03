@@ -37,6 +37,10 @@ jobs:
           args: --release --out dist --find-interpreter
           sccache: "true"
           manylinux: auto
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: "format --check"
+      - uses: astral-sh/ruff-action@v3
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
