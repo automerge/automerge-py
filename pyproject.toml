@@ -19,16 +19,26 @@ version = "0.2.0.dev2"
 websocket = [
     "websockets>=12.0",
 ]
+s3 = [
+    "aiobotocore>=2.9.0",
+]
 all = [
     "websockets>=12.0",
+    "aiobotocore>=2.9.0",
 ]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "automerge._automerge"
 
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests (may require external services)",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3.5",
     "pytest-asyncio>=0.23.0",
+    "moto[server]>=5.0.0",
 ]
