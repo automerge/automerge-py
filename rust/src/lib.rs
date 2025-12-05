@@ -1,6 +1,7 @@
 use std::{
+    cell::{Cell, RefCell},
     mem::transmute,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
 };
 
 use ::automerge::{
@@ -17,9 +18,38 @@ use pyo3::{
     types::{PyBool, PyBytes, PyDateTime, PyTuple},
 };
 
-struct Inner {
-    doc: am::Automerge,
-    tx: Option<am::transaction::Transaction<'static>>,
+mod repo;
+
+/// Reference to an Automerge document - either owned, borrowed, or actor-backed
+enum DocumentRef {
+    /// An owned document
+    Owned(am::Automerge),
+    /// A borrowed document (raw pointer that can be temporarily removed)
+    /// Set to None when the callback completes or needs to be invalidated
+    Borrowed(Cell<Option<*mut am::Automerge>>),
+    /// A reference to a document managed by a DocumentActor
+    /// Each access acquires the mutex lock
+    Actor(Arc<Mutex<samod_core::actors::document::DocumentActor>>),
+}
+
+// SAFETY: DocumentRef is Send + Sync because:
+// - Owned variant contains am::Automerge which is Send + Sync
+// - Borrowed variant is only used within with_document callbacks which execute synchronously
+//   and the pointer is never sent across threads or accessed concurrently
+unsafe impl Send for DocumentRef {}
+unsafe impl Sync for DocumentRef {}
+
+thread_local! {
+    /// Tracks the current document context when inside a with_document() callback.
+    /// Stores (Arc pointer address as identity, document pointer).
+    /// This allows reentrant read access without deadlocking on the mutex.
+    static CURRENT_DOC_CONTEXT: RefCell<Option<(usize, *const am::Automerge)>> =
+        RefCell::new(None);
+}
+
+pub(crate) struct Inner {
+    pub(crate) doc_ref: DocumentRef,
+    pub(crate) tx: Option<am::transaction::Transaction<'static>>,
 }
 
 fn get_heads(heads: Option<Vec<PyChangeHash>>) -> Option<Vec<ChangeHash>> {
@@ -27,8 +57,116 @@ fn get_heads(heads: Option<Vec<PyChangeHash>>) -> Option<Vec<ChangeHash>> {
 }
 
 impl Inner {
-    fn new(doc: am::Automerge) -> Self {
-        Self { doc, tx: None }
+    pub(crate) fn new(doc: am::Automerge) -> Self {
+        Self {
+            doc_ref: DocumentRef::Owned(doc),
+            tx: None,
+        }
+    }
+
+    pub(crate) fn new_borrowed(doc_ptr: *mut am::Automerge) -> Self {
+        Self {
+            doc_ref: DocumentRef::Borrowed(Cell::new(Some(doc_ptr))),
+            tx: None,
+        }
+    }
+
+    /// Execute a callback with an immutable reference to the document
+    ///
+    /// For Owned and Borrowed documents, provides direct reference.
+    /// For Actor-backed documents, acquires mutex lock before calling callback.
+    ///
+    /// Returns error if:
+    /// - Called on a borrowed document that has been invalidated
+    /// - Called while a transaction is active (transaction has exclusive access)
+    fn with_doc<F, R>(&self, f: F) -> PyResult<R>
+    where
+        F: FnOnce(&am::Automerge) -> R,
+    {
+        if self.tx.is_some() {
+            return Err(PyException::new_err(
+                "Cannot access document while transaction is active",
+            ));
+        }
+
+        match &self.doc_ref {
+            DocumentRef::Owned(doc) => Ok(f(doc)),
+            DocumentRef::Borrowed(cell) => {
+                let ptr = cell.get().ok_or_else(|| {
+                    PyException::new_err(
+                        "Document cannot be accessed: either used after with_document callback completed, or invalidated"
+                    )
+                })?;
+                // SAFETY: The pointer is valid because:
+                // 1. It was created from a valid reference
+                // 2. We're within the callback scope (otherwise ptr would be None)
+                // 3. No transaction is active (checked above)
+                Ok(f(unsafe { &*ptr }))
+            }
+            DocumentRef::Actor(arc_mutex) => {
+                // Get the identity of this actor (Arc pointer address)
+                let arc_id = Arc::as_ptr(arc_mutex) as usize;
+
+                // Check if we're currently inside a callback for THIS actor
+                let context = CURRENT_DOC_CONTEXT.with(|ctx| *ctx.borrow());
+
+                if let Some((ctx_arc_id, doc_ptr)) = context {
+                    if ctx_arc_id == arc_id {
+                        // We're in a callback for this same actor!
+                        // Use the existing document reference instead of locking
+                        // SAFETY: The pointer is valid because:
+                        // 1. We're on the same thread (thread-local storage)
+                        // 2. The callback is still executing (context would be None otherwise)
+                        // 3. Python GIL ensures single-threaded execution
+                        // 4. The document reference outlives this operation
+                        return Ok(f(unsafe { &*doc_ptr }));
+                    }
+                }
+
+                // Not in a callback, or different actor: use normal mutex path
+                let actor = arc_mutex.lock().unwrap();
+                let doc = actor.document();
+                Ok(f(doc))
+            }
+        }
+    }
+
+    /// Get a mutable reference to the document
+    fn doc_mut(&mut self) -> PyResult<&mut am::Automerge> {
+        if self.tx.is_some() {
+            return Err(PyException::new_err(
+                "cannot mutate docuemnt with an active transaction",
+            ));
+        }
+        match &mut self.doc_ref {
+            DocumentRef::Owned(doc) => Ok(doc),
+            DocumentRef::Borrowed(cell) => {
+                let ptr = cell.get().ok_or_else(|| {
+                    PyException::new_err(
+                        "Document cannot be accessed: either used after with_document callback completed, or invalidated"
+                    )
+                })?;
+                // SAFETY: We're about to create a transaction which will have exclusive access
+                Ok(unsafe { &mut *ptr })
+            },
+            DocumentRef::Actor(_) => {
+                Err(PyException::new_err(
+                    "Cannot mutate read-only document from DocHandle.doc(). Use DocHandle.change() instead."
+                ))
+            }
+        }
+    }
+
+    /// Invalidate a borrowed document (no-op for owned documents)
+    pub(crate) fn invalidate(&self) {
+        if let DocumentRef::Borrowed(ref cell) = self.doc_ref {
+            cell.set(None);
+        }
+    }
+
+    /// Check if this is a borrowed document
+    fn is_borrowed(&self) -> bool {
+        matches!(self.doc_ref, DocumentRef::Borrowed(_))
     }
 
     // Read methods go on Inner as they're callable from either Transaction or Document.
@@ -36,7 +174,7 @@ impl Inner {
         if let Some(tx) = self.tx.as_ref() {
             tx.object_type(obj_id.0)
         } else {
-            self.doc.object_type(obj_id.0)
+            self.with_doc(|doc| doc.object_type(obj_id.0))?
         }
         .map_err(|e| PyException::new_err(e.to_string()))
         .map(PyObjType::from_objtype)
@@ -48,34 +186,41 @@ impl Inner {
         prop: PyProp,
         heads: Option<Vec<PyChangeHash>>,
     ) -> PyResult<Option<(PyValue<'py>, PyObjId)>> {
-        let res = if let Some(tx) = self.tx.as_ref() {
-            match get_heads(heads) {
+        if let Some(tx) = self.tx.as_ref() {
+            let res = match get_heads(heads) {
                 Some(heads) => tx.get_at(obj_id.0, prop.0, &heads),
                 None => tx.get(obj_id.0, prop.0),
             }
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+            Ok(res.map(|(v, id)| (PyValue(v.into_owned()), PyObjId(id))))
         } else {
-            match get_heads(heads) {
-                Some(heads) => self.doc.get_at(obj_id.0, prop.0, &heads),
-                None => self.doc.get(obj_id.0, prop.0),
-            }
+            self.with_doc(|doc| {
+                let res = match get_heads(heads) {
+                    Some(heads) => doc.get_at(obj_id.0, prop.0, &heads),
+                    None => doc.get(obj_id.0, prop.0),
+                }
+                .map_err(|e| PyException::new_err(e.to_string()))?;
+                Ok(res.map(|(v, id)| (PyValue(v.into_owned()), PyObjId(id))))
+            })?
         }
-        .map_err(|e| PyException::new_err(e.to_string()))?;
-        Ok(res.map(|(v, id)| (PyValue(v.into_owned()), PyObjId(id))))
     }
 
     fn keys(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<String>> {
-        let res = if let Some(tx) = self.tx.as_ref() {
-            match get_heads(heads) {
+        if let Some(tx) = self.tx.as_ref() {
+            let res = match get_heads(heads) {
                 Some(heads) => tx.keys_at(obj_id.0, &heads),
                 None => tx.keys(obj_id.0),
-            }
+            };
+            Ok(res.collect())
         } else {
-            match get_heads(heads) {
-                Some(heads) => self.doc.keys_at(obj_id.0, &heads),
-                None => self.doc.keys(obj_id.0),
-            }
-        };
-        Ok(res.collect())
+            self.with_doc(|doc| {
+                let res = match get_heads(heads) {
+                    Some(heads) => doc.keys_at(obj_id.0, &heads),
+                    None => doc.keys(obj_id.0),
+                };
+                res.collect()
+            })
+        }
     }
 
     fn values<'py>(
@@ -83,44 +228,47 @@ impl Inner {
         obj_id: PyObjId,
         heads: Option<Vec<PyChangeHash>>,
     ) -> PyResult<Vec<(PyValue<'py>, PyObjId)>> {
-        let res = if let Some(tx) = self.tx.as_ref() {
-            match get_heads(heads) {
+        if let Some(tx) = self.tx.as_ref() {
+            let res = match get_heads(heads) {
                 Some(heads) => tx.values_at(obj_id.0, &heads),
                 None => tx.values(obj_id.0),
-            }
+            };
+            Ok(res
+                .map(|(v, id)| (PyValue(v.into_owned()), PyObjId(id)))
+                .collect())
         } else {
-            match get_heads(heads) {
-                Some(heads) => self.doc.values_at(obj_id.0, &heads),
-                None => self.doc.values(obj_id.0),
-            }
+            self.with_doc(|doc| {
+                let res = match get_heads(heads) {
+                    Some(heads) => doc.values_at(obj_id.0, &heads),
+                    None => doc.values(obj_id.0),
+                };
+                res.map(|(v, id)| (PyValue(v.into_owned()), PyObjId(id)))
+                    .collect()
+            })
         }
-        .map(|(v, id)| (PyValue(v.into_owned()), PyObjId(id)));
-        Ok(res.collect())
     }
 
-    fn get_heads(&self) -> Vec<PyChangeHash> {
-        if let Some(tx) = self.tx.as_ref() {
+    fn get_heads(&self) -> PyResult<Vec<PyChangeHash>> {
+        let heads = if let Some(tx) = self.tx.as_ref() {
             tx.get_heads()
         } else {
-            self.doc.get_heads()
-        }
-        .into_iter()
-        .map(|c| PyChangeHash(c))
-        .collect()
+            self.with_doc(|doc| doc.get_heads())?
+        };
+        Ok(heads.into_iter().map(|c| PyChangeHash(c)).collect())
     }
 
-    fn length(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> usize {
-        if let Some(tx) = self.tx.as_ref() {
+    fn length(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<usize> {
+        Ok(if let Some(tx) = self.tx.as_ref() {
             match get_heads(heads) {
                 Some(heads) => tx.length_at(obj_id.0, &heads),
                 None => tx.length(obj_id.0),
             }
         } else {
-            match get_heads(heads) {
-                Some(heads) => self.doc.length_at(obj_id.0, &heads),
-                None => self.doc.length(obj_id.0),
-            }
-        }
+            self.with_doc(|doc| match get_heads(heads) {
+                Some(heads) => doc.length_at(obj_id.0, &heads),
+                None => doc.length(obj_id.0),
+            })?
+        })
     }
 
     fn text(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<String> {
@@ -130,10 +278,10 @@ impl Inner {
                 None => tx.text(obj_id.0),
             }
         } else {
-            match get_heads(heads) {
-                Some(heads) => self.doc.text_at(obj_id.0, &heads),
-                None => self.doc.text(obj_id.0),
-            }
+            self.with_doc(|doc| match get_heads(heads) {
+                Some(heads) => doc.text_at(obj_id.0, &heads),
+                None => doc.text(obj_id.0),
+            })?
         }
         .map_err(|e| PyException::new_err(e.to_string()))
     }
@@ -145,10 +293,10 @@ impl Inner {
                 None => tx.marks(obj_id.0),
             }
         } else {
-            match get_heads(heads) {
-                Some(heads) => self.doc.marks_at(obj_id.0, &heads),
-                None => self.doc.marks(obj_id.0),
-            }
+            self.with_doc(|doc| match get_heads(heads) {
+                Some(heads) => doc.marks_at(obj_id.0, &heads),
+                None => doc.marks(obj_id.0),
+            })?
         }
         .map_err(|e| PyException::new_err(e.to_string()))?;
         Ok(res
@@ -163,9 +311,61 @@ impl Inner {
     }
 }
 
-#[pyclass]
-struct Document {
+// A unified Automerge document that can be owned, borrowed, or part of a DocumentActor.
+//
+// Owned documents are created with `Document::new()` and own their Automerge document.
+// Borrowed documents are created within `with_document` callbacks and wrap a raw pointer
+// to a document that exists elsewhere. The document actor version is created
+// with Document::new_from_actor
+#[pyclass(name = "Document")]
+pub(crate) struct Document {
     inner: Arc<RwLock<Inner>>,
+}
+
+// SAFETY: Document is Send + Sync because it uses Arc<RwLock<Inner>>
+// which properly synchronizes access across threads
+unsafe impl Send for Document {}
+unsafe impl Sync for Document {}
+
+impl Document {
+    /// Create a new borrowed Document from a mutable reference
+    ///
+    /// SAFETY: The caller must ensure that:
+    /// 1. The document reference remains valid for the lifetime of this Document
+    /// 2. invalidate() is called before the document reference becomes invalid
+    /// 3. Only one borrowed Document exists for a given document at a time
+    pub(crate) unsafe fn new_borrowed(doc: &mut am::Automerge) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(Inner::new_borrowed(doc as *mut am::Automerge))),
+        }
+    }
+
+    /// Invalidate a borrowed document (no-op for owned documents)
+    ///
+    /// This should be called after the with_document callback completes to ensure
+    /// that any further attempts to use a borrowed document will panic instead of causing UB.
+    pub(crate) fn invalidate(&self) {
+        let inner = self.inner.read().expect("Failed to acquire read lock");
+        inner.invalidate();
+    }
+
+    /// Create a new Document backed by a DocumentActor
+    ///
+    /// The returned document is read-only and acquires the actor's mutex on each access.
+    /// This allows direct property access without callbacks, but with the trade-off of
+    /// mutex acquisition overhead per operation.
+    ///
+    /// Transactions cannot be created on actor-backed documents.
+    pub(crate) fn new_from_actor(
+        actor: Arc<Mutex<samod_core::actors::document::DocumentActor>>,
+    ) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(Inner {
+                doc_ref: DocumentRef::Actor(actor),
+                tx: None,
+            })),
+        }
+    }
 }
 
 #[pymethods]
@@ -187,177 +387,58 @@ impl Document {
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.is_some() {
-            return Err(PyException::new_err(
-                "cannot get actor id with an active transaction",
-            ));
-        }
-
-        Ok(PyBytes::new(py, inner.doc.get_actor().to_bytes()))
+        inner.with_doc(|doc| PyBytes::new(py, doc.get_actor().to_bytes()))
     }
 
     fn set_actor(&mut self, actor_id: &[u8]) -> PyResult<()> {
-        let mut inner = self
+        let inner = self
             .inner
-            .write()
-            .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
-        if inner.tx.is_some() {
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+
+        // Check if this is a borrowed document
+        if inner.is_borrowed() {
             return Err(PyException::new_err(
-                "cannot set actor with an active transaction",
+                "cannot set actor id on a borrowed document",
             ));
         }
 
-        inner.doc.set_actor(ActorId::from(actor_id));
-        Ok(())
-    }
+        // Drop the read lock before acquiring write lock
+        drop(inner);
 
-    fn transaction(&self) -> PyResult<Transaction> {
         let mut inner = self
             .inner
             .write()
             .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
+
+        // Get mutable reference to the document
+        let doc = inner.doc_mut()?;
+        doc.set_actor(ActorId::from(actor_id));
+        Ok(())
+    }
+
+    fn transaction(&mut self) -> PyResult<Transaction> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
+
         if inner.tx.is_some() {
             return Err(PyException::new_err("transaction already active"));
         }
 
-        // Here we're transmuting the lifetime of the transaction to `static`, which is okay
+        // Get mutable reference to the document and create transaction
+        let doc = inner.doc_mut()?;
+
+        // SAFETY: We're transmuting the lifetime of the transaction to `static`, which is okay
         // because we are then storing the transaction in `Inner` which means the document will
         // live as long as the transaction.
-        let tx = unsafe { transmute(inner.doc.transaction()) };
+        let tx = unsafe { transmute(doc.transaction()) };
         inner.tx = Some(tx);
+
         Ok(Transaction {
             inner: Arc::clone(&self.inner),
         })
-    }
-
-    fn save<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let inner = self
-            .inner
-            .read()
-            .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.is_some() {
-            return Err(PyException::new_err(
-                "cannot save with an active transaction",
-            ));
-        }
-
-        Ok(PyBytes::new(py, &inner.doc.save()))
-    }
-
-    #[staticmethod]
-    fn load(bytes: &[u8]) -> PyResult<Self> {
-        let doc = am::Automerge::load(bytes).map_err(|e| PyException::new_err(e.to_string()))?;
-        Ok(Self {
-            inner: Arc::new(RwLock::new(Inner::new(doc))),
-        })
-    }
-
-    #[pyo3(signature=(heads=None))]
-    fn fork(&self, heads: Option<Vec<PyChangeHash>>) -> PyResult<Document> {
-        let inner = self
-            .inner
-            .read()
-            .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.is_some() {
-            return Err(PyException::new_err(
-                "cannot fork with an active transaction",
-            ));
-        }
-        let new_doc = match get_heads(heads) {
-            Some(heads) => inner.doc.fork_at(&heads),
-            None => Ok(inner.doc.fork()),
-        }
-        .map_err(|e| PyException::new_err(e.to_string()))?;
-        Ok(Document {
-            inner: Arc::new(RwLock::new(Inner::new(new_doc))),
-        })
-    }
-
-    fn merge(&mut self, other: &Document) -> PyResult<Vec<PyChangeHash>> {
-        let mut inner = self
-            .inner
-            .write()
-            .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.is_some() {
-            return Err(PyException::new_err(
-                "cannot merge with an active transaction",
-            ));
-        }
-        let mut other_inner = other
-            .inner
-            .write()
-            .map_err(|e| PyException::new_err(e.to_string()))?;
-        if other_inner.tx.is_some() {
-            return Err(PyException::new_err(
-                "cannot merge with an active transaction",
-            ));
-        }
-        inner
-            .doc
-            .merge(&mut other_inner.doc)
-            .map(|change_hashes| change_hashes.into_iter().map(|h| PyChangeHash(h)).collect())
-            .map_err(|e| PyException::new_err(e.to_string()))
-    }
-
-    fn diff(
-        &self,
-        before_heads: Vec<PyChangeHash>,
-        after_heads: Vec<PyChangeHash>,
-    ) -> PyResult<Vec<PyPatch>> {
-        let inner = self
-            .inner
-            .read()
-            .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.is_some() {
-            return Err(PyException::new_err(
-                "cannot diff with an active transaction",
-            ));
-        }
-        let before_heads: Vec<ChangeHash> = before_heads.iter().map(|h| h.0).collect();
-        let after_heads: Vec<ChangeHash> = after_heads.iter().map(|h| h.0).collect();
-        Ok(inner
-            .doc
-            .diff(
-                &before_heads,
-                &after_heads,
-                am::patches::TextRepresentation::Array,
-            )
-            .into_iter()
-            .map(|p| PyPatch(p))
-            .collect())
-    }
-
-    fn generate_sync_message(&self, state: &mut PySyncState) -> PyResult<Option<PyMessage>> {
-        let inner = self
-            .inner
-            .read()
-            .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.is_some() {
-            return Err(PyException::new_err(
-                "cannot sync with an active transaction",
-            ));
-        }
-        Ok(inner.doc.generate_sync_message(&mut state.0).map(PyMessage))
-    }
-
-    fn receive_sync_message(
-        &mut self,
-        state: &mut PySyncState,
-        message: &mut PyMessage,
-    ) -> PyResult<()> {
-        let mut inner = self
-            .inner
-            .write()
-            .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.is_some() {
-            return Err(PyException::new_err(
-                "cannot sync with an active transaction",
-            ));
-        }
-        inner
-            .doc
-            .receive_sync_message(&mut state.0, message.0.clone())
-            .map_err(|e| PyException::new_err(e.to_string()))
     }
 
     fn get_heads(&self) -> PyResult<Vec<PyChangeHash>> {
@@ -365,18 +446,7 @@ impl Document {
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        Ok(inner.get_heads())
-    }
-
-    fn get_last_local_change(&self) -> PyResult<Option<PyChange>> {
-        let inner = self
-            .inner
-            .read()
-            .map_err(|e| PyException::new_err(e.to_string()))?;
-        Ok(inner
-            .doc
-            .get_last_local_change()
-            .map(|c| PyChange(c.to_owned())))
+        inner.get_heads()
     }
 
     fn object_type(&self, obj_id: PyObjId) -> PyResult<PyObjType> {
@@ -385,26 +455,6 @@ impl Document {
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
         inner.object_type(obj_id)
-    }
-
-    fn get_changes(&self, have_deps: Vec<PyChangeHash>) -> PyResult<Vec<PyChange>> {
-        let inner = self
-            .inner
-            .read()
-            .map_err(|e| PyException::new_err(e.to_string()))?;
-        if inner.tx.is_some() {
-            return Err(PyException::new_err(
-                "cannot get changes with an active transaction",
-            ));
-        }
-
-        let changes: Vec<ChangeHash> = have_deps.iter().map(|h| h.0).collect();
-        Ok(inner
-            .doc
-            .get_changes(&changes)
-            .into_iter()
-            .map(|c| PyChange(c.to_owned()))
-            .collect())
     }
 
     #[pyo3(signature=(obj_id, prop, heads=None))]
@@ -449,7 +499,7 @@ impl Document {
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        Ok(inner.length(obj_id, heads))
+        inner.length(obj_id, heads)
     }
 
     #[pyo3(signature=(obj_id, heads=None))]
@@ -468,6 +518,173 @@ impl Document {
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
         inner.marks(obj_id, heads)
+    }
+
+    fn fork(&self) -> PyResult<Self> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+
+        inner.with_doc(|doc| Document {
+            inner: Arc::new(RwLock::new(Inner::new(doc.fork()))),
+        })
+    }
+
+    fn fork_at(&self, heads: Vec<PyChangeHash>) -> PyResult<Self> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+
+        let heads: Vec<_> = heads.iter().map(|h| h.0).collect();
+        inner.with_doc(|doc| {
+            doc.fork_at(&heads)
+                .map(|forked| Document {
+                    inner: Arc::new(RwLock::new(Inner::new(forked))),
+                })
+                .map_err(|e| PyException::new_err(e.to_string()))
+        })?
+    }
+
+    fn merge(&mut self, other: &Document) -> PyResult<Vec<PyChangeHash>> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
+
+        if inner.tx.is_some() {
+            return Err(PyException::new_err(
+                "cannot merge with an active transaction",
+            ));
+        }
+
+        let mut other_inner = other
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+
+        // Get mutable references to both documents for merging
+        let doc = match &mut inner.doc_ref {
+            DocumentRef::Owned(ref mut d) => d,
+            DocumentRef::Borrowed(ref cell) => {
+                let ptr = cell.get().ok_or_else(|| {
+                    PyException::new_err("Document cannot be accessed: invalidated")
+                })?;
+                unsafe { &mut *ptr }
+            }
+            DocumentRef::Actor(_) => {
+                return Err(PyException::new_err(
+                    "Cannot merge actor-backed document. Use DocHandle.change() for modifications.",
+                ));
+            }
+        };
+
+        let other_doc = match &mut other_inner.doc_ref {
+            DocumentRef::Owned(ref mut d) => d,
+            DocumentRef::Borrowed(ref cell) => {
+                let ptr = cell.get().ok_or_else(|| {
+                    PyException::new_err("Document cannot be accessed: invalidated")
+                })?;
+                unsafe { &mut *ptr }
+            }
+            DocumentRef::Actor(_) => {
+                return Err(PyException::new_err(
+                    "Cannot merge actor-backed document. Use DocHandle.change() for modifications.",
+                ));
+            }
+        };
+
+        let heads = doc
+            .merge(other_doc)
+            .map_err(|e| PyException::new_err(e.to_string()))?
+            .into_iter()
+            .map(PyChangeHash)
+            .collect();
+        Ok(heads)
+    }
+
+    fn save(&self) -> PyResult<Vec<u8>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+
+        inner.with_doc(|doc| doc.save())
+    }
+
+    #[staticmethod]
+    fn load(data: &[u8]) -> PyResult<Self> {
+        let doc = am::Automerge::load(data).map_err(|e| PyException::new_err(e.to_string()))?;
+        Ok(Document {
+            inner: Arc::new(RwLock::new(Inner::new(doc))),
+        })
+    }
+
+    fn generate_sync_message(&self, sync_state: &mut PySyncState) -> PyResult<Option<PyMessage>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+
+        inner.with_doc(|doc| doc.generate_sync_message(&mut sync_state.0).map(PyMessage))
+    }
+
+    fn receive_sync_message(
+        &mut self,
+        sync_state: &mut PySyncState,
+        message: &PyMessage,
+    ) -> PyResult<()> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
+
+        if inner.tx.is_some() {
+            return Err(PyException::new_err(
+                "cannot receive sync message with an active transaction",
+            ));
+        }
+
+        let doc = inner.doc_mut()?;
+        doc.receive_sync_message(&mut sync_state.0, message.0.clone())
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        Ok(())
+    }
+
+    fn get_changes(&self, heads: Vec<PyChangeHash>) -> PyResult<Vec<PyChange>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+
+        let heads: Vec<_> = heads.iter().map(|h| h.0).collect();
+        inner.with_doc(|doc| {
+            doc.get_changes(&heads)
+                .into_iter()
+                .map(|c| PyChange(c.clone()))
+                .collect()
+        })
+    }
+
+    fn get_last_local_change(&self) -> PyResult<Option<PyChange>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+
+        inner.with_doc(|doc| doc.get_last_local_change().map(|c| PyChange(c.clone())))
+    }
+
+    fn diff(&self, before: Vec<PyChangeHash>, after: Vec<PyChangeHash>) -> PyResult<Vec<PyPatch>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+
+        let before: Vec<_> = before.iter().map(|h| h.0).collect();
+        let after: Vec<_> = after.iter().map(|h| h.0).collect();
+        inner.with_doc(|doc| doc.diff(&before, &after).into_iter().map(PyPatch).collect())
     }
 }
 
@@ -510,7 +727,7 @@ impl Transaction {
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        Ok(inner.get_heads())
+        inner.get_heads()
     }
 
     fn object_type(&self, obj_id: PyObjId) -> PyResult<PyObjType> {
@@ -563,7 +780,7 @@ impl Transaction {
             .inner
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
-        Ok(inner.length(obj_id, heads))
+        inner.length(obj_id, heads)
     }
 
     #[pyo3(signature=(obj_id, heads=None))]
@@ -804,7 +1021,7 @@ fn random_actor_id<'py>(py: Python<'py>) -> Bound<'py, PyBytes> {
 /// A Python module implemented in Rust.
 #[pymodule]
 fn _automerge(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // Classes
+    // Document classes
     m.add_class::<Document>()?;
     m.add_class::<Transaction>()?;
     m.add_class::<PySyncState>()?;
@@ -820,6 +1037,36 @@ fn _automerge(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Functions
     m.add_function(wrap_pyfunction!(random_actor_id, m)?)?;
+    m.add_function(wrap_pyfunction!(enable_tracing, m)?)?;
+
+    // Repo types
+    repo::register_types(m)?;
+
+    Ok(())
+}
+
+/// Enable tracing output for debugging samod-core internals
+///
+/// This initializes the tracing subscriber to output logs to stderr.
+/// Call this before creating repos to see internal samod-core logs.
+///
+/// Args:
+///     level: Optional log level filter (e.g., "trace", "debug", "info"). Defaults to "debug".
+#[pyfunction]
+fn enable_tracing(level: Option<String>) -> PyResult<()> {
+    use tracing_subscriber::{fmt, EnvFilter};
+
+    let filter = match level {
+        Some(l) => EnvFilter::new(l),
+        None => EnvFilter::new("info"),
+    };
+
+    fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_line_number(true)
+        .try_init()
+        .map_err(|e| PyException::new_err(format!("Failed to initialize tracing: {}", e)))?;
 
     Ok(())
 }
@@ -861,7 +1108,7 @@ impl<'py> IntoPyObject<'py> for PyObjId {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PyChangeHash(am::ChangeHash);
 
 impl<'a> FromPyObject<'a> for PyChangeHash {
@@ -1107,7 +1354,7 @@ impl PyChange {
 }
 
 #[pyclass(name = "Patch")]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PyPatch(am::Patch);
 
 #[pymethods]

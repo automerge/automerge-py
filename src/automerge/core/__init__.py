@@ -54,5 +54,3 @@ def extract(doc: Document, obj_id: bytes = ROOT) -> Thing:
 
 
 __doc__ = _automerge.__doc__
-# if hasattr(_automerge, "__all__"):
-#     __all__ = _automerge.__all__
