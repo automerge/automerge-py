@@ -103,7 +103,7 @@ jobs:
           pytest
 
   macos:
-    runs-on: ${{ matrix.target == 'x86_64' && 'macos-13' || 'macos-latest' }}
+    runs-on: ${{ matrix.target == 'x86_64' && 'macos-15-intel' || 'macos-latest' }}
     strategy:
       matrix:
         target: [x86_64, aarch64]
