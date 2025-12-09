@@ -12,7 +12,7 @@ use am::{
     ActorId,
 };
 use pyo3::{
-    exceptions::PyException,
+    exceptions::{PyException, PyValueError},
     prelude::*,
     types::{PyBool, PyBytes, PyDateTime, PyTuple},
 };
@@ -760,7 +760,7 @@ fn import_scalar(
         PyScalarType::F64 => ScalarValue::F64(value.extract::<f64>()?),
         PyScalarType::Counter => todo!(),
         PyScalarType::Timestamp => {
-            ScalarValue::Timestamp(datetime_to_timestamp(value.downcast::<PyDateTime>()?)?)
+            ScalarValue::Timestamp(datetime_to_timestamp(value.cast::<PyDateTime>()?)?)
         }
         PyScalarType::Boolean => ScalarValue::Boolean(value.extract::<bool>()?),
         PyScalarType::Unknown => todo!(),
@@ -827,26 +827,31 @@ fn _automerge(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[derive(Debug)]
 pub struct PyProp(Prop);
 
-impl<'a> FromPyObject<'a> for PyProp {
-    fn extract_bound(prop: &Bound<'a, PyAny>) -> PyResult<Self> {
+impl<'a, 'py> FromPyObject<'a, 'py> for PyProp {
+    type Error = PyErr;
+
+    fn extract(prop: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
         Ok(PyProp(match prop.extract::<String>() {
-            Ok(s) => Prop::Map(s),
+            Ok(s) => Ok(Prop::Map(s)),
             Err(_) => match prop.extract::<usize>() {
-                Ok(i) => Prop::Seq(i),
-                Err(_) => todo!(),
+                Ok(i) => Ok(Prop::Seq(i)),
+                Err(e) => Err(PyErr::new::<PyValueError, _>(e.to_string())),
             },
-        }))
+        }?))
     }
 }
 
 #[derive(Debug)]
 pub struct PyObjId(am::ObjId);
 
-impl<'a> FromPyObject<'a> for PyObjId {
-    fn extract_bound(prop: &Bound<'a, PyAny>) -> PyResult<Self> {
-        prop.extract::<&[u8]>()
-            .and_then(|b| am::ObjId::try_from(b).map_err(|e| PyException::new_err(e.to_string())))
-            .map(PyObjId)
+impl<'a, 'py> FromPyObject<'a, 'py> for PyObjId {
+    type Error = PyErr;
+
+    fn extract(prop: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        let bytes = prop.extract::<&[u8]>()?;
+        let obj_id =
+            am::ObjId::try_from(bytes).map_err(|e| PyErr::new::<PyValueError, _>(e.to_string()))?;
+        Ok(PyObjId(obj_id))
     }
 }
 
@@ -864,13 +869,14 @@ impl<'py> IntoPyObject<'py> for PyObjId {
 #[derive(Debug)]
 pub struct PyChangeHash(am::ChangeHash);
 
-impl<'a> FromPyObject<'a> for PyChangeHash {
-    fn extract_bound(v: &Bound<'a, PyAny>) -> PyResult<Self> {
-        v.extract::<&[u8]>()
-            .and_then(|b| {
-                am::ChangeHash::try_from(b).map_err(|e| PyException::new_err(e.to_string()))
-            })
-            .map(PyChangeHash)
+impl<'a, 'py> FromPyObject<'a, 'py> for PyChangeHash {
+    type Error = PyErr;
+
+    fn extract(v: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        let bytes = v.extract::<&[u8]>()?;
+        Ok(PyChangeHash(am::ChangeHash::try_from(bytes).map_err(
+            |e| PyErr::new::<PyValueError, _>(e.to_string()),
+        )?))
     }
 }
 
@@ -964,10 +970,12 @@ impl<'py> IntoPyObject<'py> for PyScalarValue {
     }
 }
 
-impl<'a> FromPyObject<'a> for PyScalarValue {
-    fn extract_bound(v: &Bound<'a, PyAny>) -> PyResult<Self> {
-        v.extract::<(PyScalarType, Bound<'a, PyAny>)>()
-            .and_then(|(t, v)| import_scalar(&v, &t).map(|v| PyScalarValue(v)))
+impl<'a, 'py> FromPyObject<'a, 'py> for PyScalarValue {
+    type Error = PyErr;
+
+    fn extract(v: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        let (scalar_type, value) = v.extract::<(PyScalarType, Bound<'py, PyAny>)>()?;
+        import_scalar(&value, &scalar_type).map(|v| PyScalarValue(v))
     }
 }
 

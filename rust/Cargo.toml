@@ -9,7 +9,7 @@ name = "automerge"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = "0.25.1"
+pyo3 = "0.27.2"
 automerge = "0.5.7"
 hex = "^0.4.3"
 thiserror = "^1.0.16"
