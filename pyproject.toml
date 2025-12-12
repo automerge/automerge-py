@@ -19,6 +19,21 @@ version = "0.2.0.dev1"
 websocket = [
     "websockets>=12.0",
 ]
+s3 = [
+    "aiobotocore>=2.9.0",
+]
+all = [
+    "websockets>=12.0",
+    "aiobotocore>=2.9.0",
+]
+
+# Optional dependencies for additional features
+# Install with: pip install automerge[websocket]
+# Or all extras: pip install automerge[all]
+[project.optional-dependencies]
+websocket = [
+    "websockets>=12.0",
+]
 all = [
     "websockets>=12.0",
 ]
