@@ -29,10 +29,8 @@ async def test_connection_cleanup_with_deny_policy():
         # Create a document in Repo A BEFORE connecting
         handle_a = await repo_a.create()
 
-        def init_doc(doc):
+        with handle_a.change() as doc:
             doc["message"] = "Test document"
-
-        await handle_a.change(init_doc)
 
         # Now create and connect transports
         transport_a, transport_b = InMemoryTransport.create_pair()

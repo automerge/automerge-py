@@ -41,11 +41,9 @@ async def main():
         # Create a new document
         handle = await repo.create()
 
-        def init_doc(doc):
+        with handle.change() as doc:
             doc["from"] = "client"
             doc["clicks"] = 0
-
-        await handle.change(init_doc)
 
         print(f"\nCreated document: {handle.url}")
 
@@ -53,13 +51,13 @@ async def main():
         for i in range(5):
             await asyncio.sleep(2)
 
-            def increment(doc):
-                current = doc["clicks"]
+            # Read current value before change
+            current = handle.doc()["clicks"]
+
+            with handle.change() as doc:
                 new_value = current + 1
                 doc["clicks"] = new_value
                 print(f"Incremented clicks to {new_value}")
-
-            await handle.change(increment)
 
         print("\nChanges complete. Press Ctrl+C to disconnect.")
 

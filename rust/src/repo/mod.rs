@@ -6,28 +6,28 @@
 use pyo3::prelude::*;
 
 // Module declarations
-pub mod types;
-pub mod storage;
-pub mod io;
-pub mod loader;
 pub mod commands;
-pub mod hub_events;
-pub mod hub_results;
+pub mod connection;
 pub mod document;
 pub mod hub;
-pub mod connection;
+pub mod hub_events;
+pub mod hub_results;
+pub mod io;
+pub mod loader;
+pub mod storage;
+pub mod types;
 
 // Re-export all public types
-pub use types::*;
-pub use storage::*;
-pub use io::*;
-pub use loader::*;
 pub use commands::*;
-pub use hub_events::*;
-pub use hub_results::*;
+pub use connection::*;
 pub use document::*;
 pub use hub::*;
-pub use connection::*;
+pub use hub_events::*;
+pub use hub_results::*;
+pub use io::*;
+pub use loader::*;
+pub use storage::*;
+pub use types::*;
 
 /// Register all repo types with the Python module
 pub fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {

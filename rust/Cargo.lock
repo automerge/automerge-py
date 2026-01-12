@@ -552,9 +552,9 @@ checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 
 [[package]]
 name = "samod-core"
-version = "0.5.1"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91c15991d17ac520c635dfe2851e8ebe9c4731575f3708e0f80f673147b43ebc"
+checksum = "3bab909f3bd4ecf787b3221fd4a8b480f385b3e358e84f7ddb379c0d503aa921"
 dependencies = [
  "automerge 0.7.2",
  "base64",

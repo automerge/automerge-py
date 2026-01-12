@@ -5,9 +5,9 @@
 
 use pyo3::prelude::*;
 
-use super::types::PyPeerId;
-use super::io::{PyIoTask, PyIoResult, PyStorageResultPayload};
 use super::hub::PyHub;
+use super::io::{PyIoResult, PyIoTask, PyStorageResultPayload};
+use super::types::PyPeerId;
 
 /// LoaderState variant indicating IO tasks need to be executed
 ///
@@ -34,7 +34,7 @@ impl PyLoaderStateNeedIo {
             Ok(py_list.into())
         } else {
             Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                "tasks have already been consumed"
+                "tasks have already been consumed",
             ))
         }
     }
@@ -66,10 +66,9 @@ impl PyLoaderStateLoaded {
     #[getter]
     fn hub(&self) -> PyResult<Py<PyHub>> {
         let mut guard = self.hub.lock().unwrap();
-        guard.take()
-            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                "hub has already been consumed"
-            ))
+        guard.take().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("hub has already been consumed")
+        })
     }
 
     fn __repr__(&self) -> String {
@@ -123,29 +122,31 @@ impl PySamodLoader {
         let mut rng = rand::rng();
         let timestamp = samod_core::UnixTimestamp::from_millis((now * 1000.0) as u128);
 
-        Python::with_gil(|py| {
-            match guard.step(&mut rng, timestamp) {
-                samod_core::LoaderState::NeedIo(tasks) => {
-                    let py_tasks: Vec<Py<PyIoTask>> = tasks.into_iter()
-                        .map(|task| {
-                            let py_task: PyIoTask = task.into();
-                            Py::new(py, py_task).unwrap()
-                        })
-                        .collect();
-                    let state = PyLoaderStateNeedIo {
-                        tasks: std::sync::Mutex::new(Some(py_tasks)),
-                    };
-                    Ok(Py::new(py, state)?.into())
-                }
-                samod_core::LoaderState::Loaded(hub) => {
-                    let py_hub = Py::new(py, PyHub {
+        Python::with_gil(|py| match guard.step(&mut rng, timestamp) {
+            samod_core::LoaderState::NeedIo(tasks) => {
+                let py_tasks: Vec<Py<PyIoTask>> = tasks
+                    .into_iter()
+                    .map(|task| {
+                        let py_task: PyIoTask = task.into();
+                        Py::new(py, py_task).unwrap()
+                    })
+                    .collect();
+                let state = PyLoaderStateNeedIo {
+                    tasks: std::sync::Mutex::new(Some(py_tasks)),
+                };
+                Ok(Py::new(py, state)?.into())
+            }
+            samod_core::LoaderState::Loaded(hub) => {
+                let py_hub = Py::new(
+                    py,
+                    PyHub {
                         inner: std::sync::Arc::new(std::sync::Mutex::new(*hub)),
-                    })?;
-                    let state = PyLoaderStateLoaded {
-                        hub: std::sync::Mutex::new(Some(py_hub)),
-                    };
-                    Ok(Py::new(py, state)?.into())
-                }
+                    },
+                )?;
+                let state = PyLoaderStateLoaded {
+                    hub: std::sync::Mutex::new(Some(py_hub)),
+                };
+                Ok(Py::new(py, state)?.into())
             }
         })
     }
@@ -174,7 +175,7 @@ impl PySamodLoader {
                 Ok(())
             } else {
                 Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    "Expected StorageResultPayload for loader"
+                    "Expected StorageResultPayload for loader",
                 ))
             }
         })
