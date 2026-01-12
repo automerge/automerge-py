@@ -5,9 +5,9 @@
 
 use pyo3::prelude::*;
 
-use super::types::{PyPeerId, PyStorageId};
 use super::hub_events::PyHubEvent;
 use super::hub_results::PyHubResults;
+use super::types::{PyPeerId, PyStorageId};
 
 /// Wrapper for samod_core::actors::hub::Hub
 ///
@@ -48,7 +48,8 @@ impl PyHub {
     /// including connection state, peer information, and per-document sync state.
     fn connections(&self, py: Python<'_>) -> Vec<super::connection::PyConnectionInfo> {
         let guard = self.inner.lock().unwrap();
-        guard.connections()
+        guard
+            .connections()
             .iter()
             .map(|info| super::connection::PyConnectionInfo::from_rust(py, info))
             .collect()
@@ -65,7 +66,12 @@ impl PyHub {
     ///
     /// Returns:
     ///     HubResults containing new tasks and completed commands
-    fn handle_event<'py>(&self, py: Python<'py>, now: f64, event: &PyHubEvent) -> PyResult<PyHubResults> {
+    fn handle_event<'py>(
+        &self,
+        py: Python<'py>,
+        now: f64,
+        event: &PyHubEvent,
+    ) -> PyResult<PyHubResults> {
         let mut guard = self.inner.lock().unwrap();
         let mut rng = rand::rng();
         let timestamp = samod_core::UnixTimestamp::from_millis((now * 1000.0) as u128);

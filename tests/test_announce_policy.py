@@ -195,10 +195,8 @@ class TestAnnouncePolicyIntegration:
             # Create a document
             handle_a = await repo_a.create()
 
-            def init_doc(doc):
+            with handle_a.change() as doc:
                 doc["message"] = "Test"
-
-            await handle_a.change(init_doc)
 
             # Now connect to another repo
             storage_b = InMemoryStorage()
@@ -266,10 +264,8 @@ class TestAnnouncePolicyIntegration:
             # Create document before connecting
             handle_a = await repo_a.create()
 
-            def init_doc(doc):
+            with handle_a.change() as doc:
                 doc["message"] = "Test document"
-
-            await handle_a.change(init_doc)
 
             # Connect the repos
             transport_a, transport_b = InMemoryTransport.create_pair()
@@ -343,10 +339,8 @@ class TestAnnouncePolicyIntegration:
             # Create document before connecting
             handle_a = await repo_a.create()
 
-            def init_doc(doc):
+            with handle_a.change() as doc:
                 doc["message"] = "Test document"
-
-            await handle_a.change(init_doc)
 
             # Connect the repos
             transport_a, transport_b = InMemoryTransport.create_pair()

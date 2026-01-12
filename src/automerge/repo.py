@@ -1303,6 +1303,93 @@ class Repo:
         return DocHandle(result.actor_id, document_id, self)
 
 
+class ChangeContext:
+    """Context manager for document modifications.
+
+    This class is returned by DocHandle.change() and provides a context manager
+    interface for modifying documents. Changes are committed when the context
+    exits normally, or rolled back if an exception is raised.
+
+    Example:
+        with handle.change() as doc:
+            doc["key"] = "value"
+            doc["count"] = 42
+
+    Note:
+        - Do not call `handle.doc()` inside the change block
+        - Do not nest change() calls
+    """
+
+    def __init__(self, handle: "DocHandle"):
+        """Initialize the change context.
+
+        Args:
+            handle: The DocHandle to modify
+        """
+        self._handle = handle
+        self._guard = None
+
+    def __enter__(self):
+        """Enter the change context and return a mutable document proxy.
+
+        Returns:
+            MapWriteProxy: A dict-like mutable view of the document
+        """
+        import automerge.core as core
+
+        from .document import MapWriteProxy
+
+        # Get the document actor
+        actor = self._handle._repo._doc_actors.get(self._handle._actor_id)
+        if actor is None:
+            raise ValueError(f"Document actor {self._handle._actor_id} not found")
+
+        # Begin the change - this acquires the mutex and creates a transaction
+        self._guard = actor.begin_change()
+        tx = self._guard.transaction()
+        return MapWriteProxy(tx, core.ROOT, None)
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+        """Exit the change context, committing or rolling back.
+
+        Args:
+            exc_type: Exception type if an exception was raised, None otherwise
+            exc_val: Exception value if an exception was raised, None otherwise
+            exc_tb: Exception traceback if an exception was raised, None otherwise
+
+        Returns:
+            False (never suppress exceptions)
+        """
+        if self._guard is None:
+            return False
+
+        try:
+            commit = exc_type is None
+            result = self._guard.end_change(commit, time.time())
+
+            # Always process side effects - DocActorResult may contain effects
+            # even if the transaction was rolled back
+            for io_task in result.io_tasks:
+                asyncio.create_task(
+                    self._handle._repo._handle_doc_actor_io(
+                        self._handle._actor_id, io_task
+                    )
+                )
+
+            for msg in result.outgoing_messages:
+                self._handle._repo._hub_event_queue.put_nowait(
+                    HubEvent.actor_message(self._handle._actor_id, msg)
+                )
+
+            # Emit change event only if there were actual changes
+            if result.patches:
+                self._handle._emit("change", result.patches)
+        finally:
+            self._guard = None
+
+        return False  # Don't suppress exceptions
+
+
 class DocHandle:
     """Handle to an Automerge document in the repository.
 
@@ -1344,10 +1431,6 @@ class DocHandle:
     def doc(self):
         """Return a read-only view of the document.
 
-        The returned document proxy acquires a lock on each property access.
-        Nested accesses (e.g., doc["a"]["b"]["c"]) will acquire the lock
-        multiple times, once per level.
-
         This document reference is read-only. Any attempt to modify it will
         raise an exception. Use change() for mutations.
 
@@ -1378,57 +1461,23 @@ class DocHandle:
         # Wrap in MapReadProxy for Pythonic dict-like access
         return MapReadProxy(core_doc, core.ROOT, None)
 
-    async def change(self, func: Callable[[Any], Any]) -> Any:
-        """Modify the document.
-
-        Args:
-            func: A function that takes a MapWriteProxy and modifies it
-
-        Returns:
-            The value returned by func
+    def change(self) -> ChangeContext:
+        """Return a context manager for modifying the document.
 
         Example:
-            >>> def modify(doc):
-            ...     doc["key"] = "value"
-            >>> await handle.change(modify)
+            with handle.change() as doc:
+                doc["key"] = "value"
+                doc["count"] = 42
+
+        Note:
+            - Do not use `await` inside the change block
+            - Do not call `handle.doc()` inside the change block
+            - Do not nest change() calls
+
+        Returns:
+            ChangeContext: A context manager that provides mutable document access
         """
-        import time
-
-        import automerge.core as core
-
-        from .document import MapWriteProxy
-
-        # Get the document actor
-        actor = self._repo._doc_actors.get(self._actor_id)
-        if actor is None:
-            raise ValueError(f"Document actor {self._actor_id} not found")
-
-        # Wrap in transaction and MapWriteProxy
-        def wrapper(core_doc):
-            with core_doc.transaction() as tx:
-                proxy = MapWriteProxy(tx, core.ROOT, None)
-                return func(proxy)
-
-        # Call with_document - it will automatically capture patches
-        result = actor.with_document(time.time(), wrapper)
-
-        # Handle any IO tasks generated
-        for io_task in result.io_tasks:
-            asyncio.create_task(
-                self._repo._handle_doc_actor_io(self._actor_id, io_task)
-            )
-
-        # Handle outgoing messages
-        for msg in result.outgoing_messages:
-            await self._repo._hub_event_queue.put(
-                HubEvent.actor_message(self._actor_id, msg)
-            )
-
-        # Emit "change" event only if there were actual changes
-        if result.patches:
-            self._emit("change", result.patches)
-
-        return result.return_value
+        return ChangeContext(self)
 
     def on(self, event: str, callback: Callable) -> None:
         """Register a callback for a document event.
@@ -1443,7 +1492,8 @@ class DocHandle:
             >>> def on_change(patches):
             ...     print(f"Document changed! {len(patches)} patches")
             >>> handle.on("change", on_change)
-            >>> await handle.change(lambda doc: doc.put(ROOT, "key", "value"))
+            >>> with handle.change() as doc:
+            ...     doc["key"] = "value"
             # Will print "Document changed! N patches"
         """
         if event not in self._event_callbacks:

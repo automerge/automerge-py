@@ -5,10 +5,10 @@
 
 use pyo3::prelude::*;
 
-use super::types::{PyPeerId, PyConnectionId, PyDocumentActorId, PyDocumentId};
-use super::document::{PyDocToHubMsg};
 use super::commands::PyDispatchedCommand;
+use super::document::PyDocToHubMsg;
 use super::io::PyIoResult;
+use super::types::{PyConnectionId, PyDocumentActorId, PyDocumentId, PyPeerId};
 
 /// Wrapper for samod_core::network::PeerInfo
 ///
@@ -34,8 +34,11 @@ impl PyPeerInfo {
     }
 
     fn __repr__(&self) -> String {
-        format!("PeerInfo(peer_id={}, protocol_version={})",
-                self.inner.peer_id.as_str(), self.inner.protocol_version)
+        format!(
+            "PeerInfo(peer_id={}, protocol_version={})",
+            self.inner.peer_id.as_str(),
+            self.inner.protocol_version
+        )
     }
 }
 

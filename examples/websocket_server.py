@@ -27,11 +27,9 @@ async def main():
         # Create an initial document
         handle = await repo.create()
 
-        def init_doc(doc):
+        with handle.change() as doc:
             doc["message"] = "Hello from server!"
             doc["counter"] = 0
-
-        await handle.change(init_doc)
 
         print(f"Created document: {handle.url}")
         print(f"Document ID: {handle.document_id}")
