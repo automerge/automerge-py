@@ -48,11 +48,9 @@ async def test_websocket_document_sync():
             handle_a = await repo_a.create()
 
             # Set some content
-            def init_doc(doc):
+            with handle_a.change() as doc:
                 doc["title"] = "WebSocket Test"
                 doc["count"] = 42
-
-            await handle_a.change(init_doc)
 
             # Give time for sync
             await asyncio.sleep(0.5)
@@ -103,19 +101,15 @@ async def test_websocket_bidirectional_sync():
             # Create document in client (repo_a)
             handle_a1 = await repo_a.create()
 
-            def init_doc_a(doc):
+            with handle_a1.change() as doc:
                 doc["source"] = "client"
-
-            await handle_a1.change(init_doc_a)
             await asyncio.sleep(0.5)
 
             # Create document in server (repo_b)
             handle_b1 = await repo_b.create()
 
-            def init_doc_b(doc):
+            with handle_b1.change() as doc:
                 doc["source"] = "server"
-
-            await handle_b1.change(init_doc_b)
             await asyncio.sleep(0.5)
 
             # Verify client doc synced to server
@@ -166,10 +160,8 @@ async def test_websocket_multiple_clients():
             # Create document in client1
             handle1 = await repo_client1.create()
 
-            def init_doc(doc):
+            with handle1.change() as doc:
                 doc["from"] = "client1"
-
-            await handle1.change(init_doc)
             await asyncio.sleep(0.5)
 
             # Verify it synced to server
@@ -210,10 +202,8 @@ async def test_websocket_document_changes_sync():
             # Create document with initial content
             handle_a = await repo_a.create()
 
-            def init_doc(doc):
+            with handle_a.change() as doc:
                 doc["counter"] = 0
-
-            await handle_a.change(init_doc)
             await asyncio.sleep(0.5)
 
             # Get handle on repo_b
@@ -222,12 +212,9 @@ async def test_websocket_document_changes_sync():
 
             # Make multiple changes on repo_a
             for i in range(1, 4):
-
-                def increment(doc):
-                    current = doc["counter"]
+                current = handle_a.doc()["counter"]
+                with handle_a.change() as doc:
                     doc["counter"] = current + 1
-
-                await handle_a.change(increment)
                 await asyncio.sleep(0.3)
 
             # Verify final value on repo_b
@@ -282,10 +269,8 @@ async def test_websocket_connection_lost_during_operation():
             # Create document
             handle = await repo_a.create()
 
-            def init_doc(doc):
+            with handle.change() as doc:
                 doc["test"] = "value"
-
-            await handle.change(init_doc)
             await asyncio.sleep(0.3)
 
             # Force close the server (simulates connection loss)

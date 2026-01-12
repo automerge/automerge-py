@@ -218,7 +218,8 @@ async def test_filesystem_storage_with_repo(tmp_path):
         url = handle.url
 
         # Make a change
-        await handle.change(lambda doc: doc.__setitem__("key", "value"))
+        with handle.change() as doc:
+            doc["key"] = "value"
 
         # Verify the change
         assert handle.doc()["key"] == "value"

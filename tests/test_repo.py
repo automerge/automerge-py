@@ -1092,10 +1092,8 @@ async def test_repo_document_modification():
 
         # Test modifying the document
         # Put a value in the document
-        def set_value(doc):
+        with doc_handle.change() as doc:
             doc["hello"] = "world"
-
-        await doc_handle.change(set_value)
 
         # Give IO tasks time to process
         await asyncio.sleep(0.1)
@@ -1132,10 +1130,8 @@ async def test_document_event_emitter_basic():
         doc_handle.on("change", on_change)
 
         # Modify the document
-        def set_value(doc):
+        with doc_handle.change() as doc:
             doc["key"] = "value"
-
-        await doc_handle.change(set_value)
         await asyncio.sleep(0.1)
 
         # Callback should have been invoked once
@@ -1177,10 +1173,8 @@ async def test_document_event_emitter_multiple_callbacks():
         doc_handle.on("change", on_change_3)
 
         # Modify the document
-        def set_value(doc):
+        with doc_handle.change() as doc:
             doc["key"] = "value"
-
-        await doc_handle.change(set_value)
         await asyncio.sleep(0.1)
 
         # All callbacks should have been invoked
@@ -1212,11 +1206,8 @@ async def test_document_event_emitter_multiple_changes():
 
         # Make multiple changes
         for i in range(5):
-
-            def set_value(doc, value=i):
-                doc[f"key{value}"] = f"value{value}"
-
-            await doc_handle.change(set_value)
+            with doc_handle.change() as doc:
+                doc[f"key{i}"] = f"value{i}"
             await asyncio.sleep(0.05)
 
         # Callback should have been invoked 5 times
@@ -1254,11 +1245,10 @@ async def test_document_event_emitter_error_isolation():
         doc_handle.on("change", on_change_3)
 
         # Modify the document
-        def set_value(doc):
+        with doc_handle.change() as doc:
             doc["key"] = "value"
 
         # This should not raise an exception
-        await doc_handle.change(set_value)
         await asyncio.sleep(0.1)
 
         # First and third callbacks should still have been invoked
@@ -1279,11 +1269,10 @@ async def test_document_event_emitter_no_callbacks():
         await asyncio.sleep(0.1)
 
         # Modify the document without any callbacks registered
-        def set_value(doc):
+        with doc_handle.change() as doc:
             doc["key"] = "value"
 
         # This should work fine
-        await doc_handle.change(set_value)
         await asyncio.sleep(0.1)
 
         # Verify the value was set
@@ -1314,10 +1303,8 @@ async def test_document_event_emitter_doc_method_no_emit():
         doc_handle.on("change", on_change)
 
         # First, make a change to verify callback works
-        def set_value(doc):
+        with doc_handle.change() as doc:
             doc["key"] = "value"
-
-        await doc_handle.change(set_value)
         await asyncio.sleep(0.1)
 
         assert len(callback_count) == 1
@@ -1358,10 +1345,8 @@ async def test_document_event_emitter_off():
         doc_handle.on("change", on_change_2)
 
         # Make a change - both should be called
-        def set_value_1(doc):
+        with doc_handle.change() as doc:
             doc["key1"] = "value1"
-
-        await doc_handle.change(set_value_1)
         await asyncio.sleep(0.1)
 
         assert len(callback1_count) == 1
@@ -1371,10 +1356,8 @@ async def test_document_event_emitter_off():
         doc_handle.off("change", on_change_1)
 
         # Make another change - only second should be called
-        def set_value_2(doc):
+        with doc_handle.change() as doc:
             doc["key2"] = "value2"
-
-        await doc_handle.change(set_value_2)
         await asyncio.sleep(0.1)
 
         # First callback should still be 1, second should be 2
@@ -1385,10 +1368,8 @@ async def test_document_event_emitter_off():
         doc_handle.off("change", on_change_2)
 
         # Make another change - neither should be called
-        def set_value_3(doc):
+        with doc_handle.change() as doc:
             doc["key3"] = "value3"
-
-        await doc_handle.change(set_value_3)
         await asyncio.sleep(0.1)
 
         # Both should still be at their previous counts
@@ -1440,21 +1421,17 @@ async def test_document_event_emitter_no_change_no_emit():
         doc_handle.on("change", on_change)
 
         # Call change() but don't actually modify anything
-        def no_op(doc):
+        with doc_handle.change() as doc:
             # Just read, don't modify
             doc.get("nonexistent_key")
-
-        await doc_handle.change(no_op)
         await asyncio.sleep(0.1)
 
         # Callback should NOT have been invoked
         assert len(callback_count) == 0
 
         # Now make an actual change
-        def set_value(doc):
+        with doc_handle.change() as doc:
             doc["key"] = "value"
-
-        await doc_handle.change(set_value)
         await asyncio.sleep(0.1)
 
         # Now callback should have been invoked once
@@ -1506,10 +1483,8 @@ async def test_repo_find_document():
         handle_a = await repo.create()
 
         # Set some content
-        def init_doc(doc):
+        with handle_a.change() as doc:
             doc["test"] = "value"
-
-        await handle_a.change(init_doc)
 
         # Get the URL
         url = handle_a.url
@@ -1560,11 +1535,9 @@ async def test_document_sync_basic():
         handle_a = await repo_a.create()
 
         # Set some initial content
-        def init_doc(doc):
+        with handle_a.change() as doc:
             doc["title"] = "Hello from Repo A"
             doc["count"] = 42
-
-        await handle_a.change(init_doc)
 
         # Give time for the document to sync to Repo B
         await asyncio.sleep(0.5)
@@ -1623,10 +1596,8 @@ async def test_doc_direct_access_read_only():
         doc_handle = await repo.create()
 
         # Initialize with some content
-        def init_doc(doc):
+        with doc_handle.change() as doc:
             doc["key"] = "value"
-
-        await doc_handle.change(init_doc)
         await asyncio.sleep(0.1)
 
         # Get read-only document reference
@@ -1687,11 +1658,9 @@ async def test_doc_concurrent_references():
         # Create a document with some content
         doc_handle = await repo.create()
 
-        def init_doc(doc):
+        with doc_handle.change() as doc:
             doc["key1"] = "value1"
             doc["key2"] = "value2"
-
-        await doc_handle.change(init_doc)
         await asyncio.sleep(0.1)
 
         # Get multiple document references
@@ -1726,10 +1695,8 @@ async def test_doc_read_during_change():
         # Create a document with initial content
         doc_handle = await repo.create()
 
-        def init_doc(doc):
+        with doc_handle.change() as doc:
             doc["counter"] = 0
-
-        await doc_handle.change(init_doc)
         await asyncio.sleep(0.1)
 
         # Get initial document reference
@@ -1737,10 +1704,8 @@ async def test_doc_read_during_change():
         assert doc_before["counter"] == 0
 
         # Make a change
-        def increment(doc):
+        with doc_handle.change() as doc:
             doc["counter"] = 1
-
-        await doc_handle.change(increment)
         await asyncio.sleep(0.1)
 
         # Get new document reference after change
@@ -1765,11 +1730,9 @@ async def test_doc_reference_across_awaits():
         # Create a document
         doc_handle = await repo.create()
 
-        def init_doc(doc):
+        with doc_handle.change() as doc:
             doc["field1"] = "value1"
             doc["field2"] = "value2"
-
-        await doc_handle.change(init_doc)
         await asyncio.sleep(0.1)
 
         # Get document reference
@@ -1794,20 +1757,18 @@ async def test_doc_reference_across_awaits():
         assert val1_again == "value1"
 
         # Make a change via handle
-        def update(doc):
+        with doc_handle.change() as doc:
             doc["field3"] = "value3"
-
-        await doc_handle.change(update)
         await asyncio.sleep(0.1)
 
         # Original reference should see the new value (mutex provides consistent view)
-        val3 = doc.get("field3")
+        val3 = doc_handle.doc().get("field3")
         assert val3 == "value3"
 
 
 @pytest.mark.asyncio
-async def test_doc_reference_in_change_callback():
-    """Test that doc() references work inside change() callbacks without deadlock."""
+async def test_doc_inside_change_raises_error():
+    """Test that doc() raises error inside change() block."""
     from automerge.repo import InMemoryStorage
 
     storage = InMemoryStorage()
@@ -1817,31 +1778,22 @@ async def test_doc_reference_in_change_callback():
         handle = await repo.create()
 
         # Set up initial state
-        def init_counter(doc):
+        with handle.change() as doc:
             doc["counter"] = 0
-
-        await handle.change(init_counter)
         await asyncio.sleep(0.1)
 
-        # Get a doc reference
-        doc_ref = handle.doc()
+        # Attempting to use handle.doc() inside change block should raise
+        with pytest.raises(RuntimeError) as exc_info:
+            with handle.change() as doc:
+                # This should raise an error
+                _ = handle.doc()["counter"]
 
-        # Use the doc reference inside a change callback
-        # This should NOT deadlock
-        def increment_using_ref(doc):
-            doc["counter"] = doc_ref["counter"] + 1
-
-        await handle.change(increment_using_ref)
-        await asyncio.sleep(0.1)
-
-        # Verify the change worked
-        doc = handle.doc()
-        assert doc["counter"] == 1
+        assert "change()" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
-async def test_nested_doc_reference_in_change():
-    """Test that nested doc() references work in change callbacks."""
+async def test_read_before_write_in_change():
+    """Test reading values before modifying them in a change block."""
     from automerge.repo import InMemoryStorage
 
     storage = InMemoryStorage()
@@ -1851,25 +1803,19 @@ async def test_nested_doc_reference_in_change():
         handle = await repo.create()
 
         # Set up initial values
-        def init_values(doc):
+        with handle.change() as doc:
             doc["value1"] = 10
             doc["value2"] = 20
-
-        await handle.change(init_values)
         await asyncio.sleep(0.1)
 
-        # Get a doc reference
+        # Read values before the change block
         doc_ref = handle.doc()
+        val1 = doc_ref["value1"]
+        val2 = doc_ref["value2"]
 
-        # Use doc reference to read multiple values in change callback
-        def compute_sum(doc):
-            # Read from external doc reference
-            val1 = doc_ref["value1"]
-            val2 = doc_ref["value2"]
-            # Write to current doc
+        # Use the read values in the change block
+        with handle.change() as doc:
             doc["sum"] = val1 + val2
-
-        await handle.change(compute_sum)
         await asyncio.sleep(0.1)
 
         # Verify
@@ -1878,8 +1824,8 @@ async def test_nested_doc_reference_in_change():
 
 
 @pytest.mark.asyncio
-async def test_different_doc_in_change_callback():
-    """Test that accessing different document's reference works in change callback."""
+async def test_different_doc_in_change_block():
+    """Test that accessing different document's reference works in change block."""
     from automerge.repo import InMemoryStorage
 
     storage = InMemoryStorage()
@@ -1890,27 +1836,20 @@ async def test_different_doc_in_change_callback():
         handle2 = await repo.create()
 
         # Set up both documents
-        def init_doc1(doc):
+        with handle1.change() as doc:
             doc["name"] = "doc1"
-
-        await handle1.change(init_doc1)
         await asyncio.sleep(0.1)
 
-        def init_doc2(doc):
+        with handle2.change() as doc:
             doc["name"] = "doc2"
-
-        await handle2.change(init_doc2)
         await asyncio.sleep(0.1)
 
-        # Get reference to doc2
-        doc2_ref = handle2.doc()
+        # Get reference to doc2 BEFORE entering handle1's change block
+        doc2_name = handle2.doc()["name"]
 
-        # Access doc2_ref inside doc1's change callback
-        # This should work because they're different actors
-        def use_doc2_ref(doc):
-            doc["other_name"] = doc2_ref["name"]
-
-        await handle1.change(use_doc2_ref)
+        # Use the value in handle1's change block
+        with handle1.change() as doc:
+            doc["other_name"] = doc2_name
         await asyncio.sleep(0.1)
 
         # Verify
@@ -1919,8 +1858,8 @@ async def test_different_doc_in_change_callback():
 
 
 @pytest.mark.asyncio
-async def test_multiple_doc_refs_in_change():
-    """Test that multiple doc() references work in change callback."""
+async def test_read_multiple_values_before_change():
+    """Test reading multiple values before a change block."""
     from automerge.repo import InMemoryStorage
 
     storage = InMemoryStorage()
@@ -1930,22 +1869,19 @@ async def test_multiple_doc_refs_in_change():
         handle = await repo.create()
 
         # Set up state
-        def init_values(doc):
+        with handle.change() as doc:
             doc["a"] = 1
             doc["b"] = 2
-
-        await handle.change(init_values)
         await asyncio.sleep(0.1)
 
-        # Get multiple references (simulating user having refs from different places)
-        ref1 = handle.doc()
-        ref2 = handle.doc()
+        # Read values before the change block
+        ref = handle.doc()
+        val_a = ref["a"]
+        val_b = ref["b"]
 
-        # Use both in change callback
-        def compute_sum(doc):
-            doc["sum"] = ref1["a"] + ref2["b"]
-
-        await handle.change(compute_sum)
+        # Use the values in change block
+        with handle.change() as doc:
+            doc["sum"] = val_a + val_b
         await asyncio.sleep(0.1)
 
         # Verify
@@ -1954,48 +1890,34 @@ async def test_multiple_doc_refs_in_change():
 
 
 @pytest.mark.asyncio
-async def test_nested_change_detection():
-    """Test that we can detect when we're in a change callback.
-
-    Note: Truly nested change() calls (calling change from within a change callback
-    on the same thread) will be detected and raise an error. This test verifies
-    the detection mechanism works.
-    """
+async def test_nested_change_raises_error():
+    """Test that nested change() calls raise an error."""
     from automerge.repo import InMemoryStorage
 
     storage = InMemoryStorage()
     repo = await Repo.load(storage)
 
     async with repo:
-        handle1 = await repo.create()
-        handle2 = await repo.create()
+        handle = await repo.create()
 
         # Set up initial state
-        def init_value(doc):
+        with handle.change() as doc:
             doc["value"] = 1
-
-        await handle1.change(init_value)
-        await handle2.change(init_value)
         await asyncio.sleep(0.1)
 
-        # Test that we can access handle1.doc() from within handle2's change callback
-        # These are different actors, so this should work fine
-        def use_other_doc(doc):
-            # Access doc from handle1 while in handle2's change callback
-            val = handle1.doc()["value"]
-            doc["copied_value"] = val
+        # Test that nested change() raises an error
+        with pytest.raises(RuntimeError) as exc_info:
+            with handle.change() as doc:
+                # Try to start another change - should fail
+                with handle.change() as inner_doc:
+                    inner_doc["nested"] = True
 
-        await handle2.change(use_other_doc)
-        await asyncio.sleep(0.1)
-
-        # Verify it worked
-        doc2 = handle2.doc()
-        assert doc2["copied_value"] == 1
+        assert "nest" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
 async def test_context_cleanup_on_error():
-    """Test that context is cleaned up when callback raises error."""
+    """Test that context is cleaned up when change block raises error."""
     from automerge.repo import InMemoryStorage
 
     storage = InMemoryStorage()
@@ -2005,29 +1927,25 @@ async def test_context_cleanup_on_error():
         handle = await repo.create()
 
         # Set up state
-        def init_value(doc):
+        with handle.change() as doc:
             doc["value"] = 1
-
-        await handle.change(init_value)
         await asyncio.sleep(0.1)
 
-        # Callback that raises an error
+        # Change block that raises an error
         with pytest.raises(ValueError):
-
-            def error_callback(doc):
-                # Access doc() ref to set context, then raise error
-                _ = handle.doc()["value"]
+            with handle.change() as doc:
+                doc["value"] = 999  # This should be rolled back
                 raise ValueError("Intentional error")
 
-            await handle.change(error_callback)
-
         await asyncio.sleep(0.1)
 
-        # Context should be cleaned up - next change should work
-        def update_value(doc):
-            doc["value"] = 2
+        # Value should not have changed (rollback on error)
+        doc = handle.doc()
+        assert doc["value"] == 1
 
-        await handle.change(update_value)
+        # Context should be cleaned up - next change should work
+        with handle.change() as doc:
+            doc["value"] = 2
         await asyncio.sleep(0.1)
 
         # Verify subsequent operations work
@@ -2037,7 +1955,7 @@ async def test_context_cleanup_on_error():
 
 @pytest.mark.asyncio
 async def test_context_cleanup_after_success():
-    """Test that context is cleaned up after successful callback."""
+    """Test that context is cleaned up after successful change block."""
     from automerge.repo import InMemoryStorage
 
     storage = InMemoryStorage()
@@ -2047,18 +1965,14 @@ async def test_context_cleanup_after_success():
         handle = await repo.create()
 
         # First change
-        def first_change(doc):
+        with handle.change() as doc:
             doc["value"] = 1
-
-        await handle.change(first_change)
         await asyncio.sleep(0.1)
 
         # Context should be cleared after first change completes
         # Second change should not see it as "nested"
-        def second_change(doc):
+        with handle.change() as doc:
             doc["value"] = 2
-
-        await handle.change(second_change)
         await asyncio.sleep(0.1)
 
         # Verify
