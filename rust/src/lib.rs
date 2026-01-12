@@ -40,10 +40,11 @@ unsafe impl Send for DocumentRef {}
 unsafe impl Sync for DocumentRef {}
 
 thread_local! {
-    /// Tracks the current document context when inside a with_document() callback.
-    /// Stores (Arc pointer address as identity, document pointer).
-    /// This allows reentrant read access without deadlocking on the mutex.
-    static CURRENT_DOC_CONTEXT: RefCell<Option<(usize, *const am::Automerge)>> =
+    /// Tracks the current document context when inside a change() context
+    /// manager. Stores the Arc pointer address of the document actor as
+    /// identity This allows us to detect re-entrant calls to DocHandle.change()
+    /// and throw an error to avoid deadlocks
+    static CURRENT_DOC_CONTEXT: RefCell<Option<usize>> =
         RefCell::new(None);
 }
 
@@ -107,23 +108,21 @@ impl Inner {
                 // Get the identity of this actor (Arc pointer address)
                 let arc_id = Arc::as_ptr(arc_mutex) as usize;
 
-                // Check if we're currently inside a callback for THIS actor
+                // Check if we're currently inside a change block for THIS actor
                 let context = CURRENT_DOC_CONTEXT.with(|ctx| *ctx.borrow());
 
-                if let Some((ctx_arc_id, doc_ptr)) = context {
+                if let Some(ctx_arc_id) = context {
                     if ctx_arc_id == arc_id {
-                        // We're in a callback for this same actor!
-                        // Use the existing document reference instead of locking
-                        // SAFETY: The pointer is valid because:
-                        // 1. We're on the same thread (thread-local storage)
-                        // 2. The callback is still executing (context would be None otherwise)
-                        // 3. Python GIL ensures single-threaded execution
-                        // 4. The document reference outlives this operation
-                        return Ok(f(unsafe { &*doc_ptr }));
+                        // We're inside a change() block for this actor.
+                        // Reject the doc() call - user should use the proxy returned by change().
+                        return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                            "Cannot call doc() inside a change() block. \
+                             Use the proxy returned by change() instead.",
+                        ));
                     }
                 }
 
-                // Not in a callback, or different actor: use normal mutex path
+                // Not in a change block, or different actor: use normal mutex path
                 let actor = arc_mutex.lock().unwrap();
                 let doc = actor.document();
                 Ok(f(doc))
@@ -718,6 +717,30 @@ impl Transaction {
             } else {
                 tx.commit();
             }
+        }
+        Ok(())
+    }
+
+    /// Commit the transaction, applying all changes to the document.
+    fn commit(&self) -> PyResult<()> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
+        if let Some(tx) = inner.tx.take() {
+            tx.commit();
+        }
+        Ok(())
+    }
+
+    /// Rollback the transaction, discarding all changes.
+    fn rollback(&self) -> PyResult<()> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
+        if let Some(tx) = inner.tx.take() {
+            tx.rollback();
         }
         Ok(())
     }

@@ -135,7 +135,11 @@ impl PyStorageTaskPut {
     }
 
     fn __repr__(&self) -> String {
-        format!("StorageTaskPut(key={}, value=<{} bytes>)", self.key.0, self.value.len())
+        format!(
+            "StorageTaskPut(key={}, value=<{} bytes>)",
+            self.key.0,
+            self.value.len()
+        )
     }
 }
 

@@ -7,7 +7,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
 
-use super::types::{PyConnectionId, PyPeerId, PyDocumentId};
+use super::types::{PyConnectionId, PyDocumentId, PyPeerId};
 
 // ===== Connection State =====
 
@@ -53,11 +53,17 @@ pub struct PyConnectionStateConnected {
 impl PyConnectionStateConnected {
     #[new]
     fn new(their_peer_id: PyPeerId) -> (Self, PyConnectionState) {
-        (PyConnectionStateConnected { their_peer_id }, PyConnectionState)
+        (
+            PyConnectionStateConnected { their_peer_id },
+            PyConnectionState,
+        )
     }
 
     fn __repr__(&self) -> String {
-        format!("ConnectionStateConnected(their_peer_id={})", self.their_peer_id.0)
+        format!(
+            "ConnectionStateConnected(their_peer_id={})",
+            self.their_peer_id.0
+        )
     }
 }
 
@@ -150,12 +156,14 @@ impl From<&samod_core::network::PeerDocState> for PyPeerDocState {
         PyPeerDocState {
             last_received: state.last_received.map(|ts| ts.as_millis() as f64 / 1000.0),
             last_sent: state.last_sent.map(|ts| ts.as_millis() as f64 / 1000.0),
-            last_sent_heads: state.last_sent_heads.as_ref().map(|heads| {
-                heads.iter().map(|h| crate::PyChangeHash(*h)).collect()
-            }),
-            last_acked_heads: state.last_acked_heads.as_ref().map(|heads| {
-                heads.iter().map(|h| crate::PyChangeHash(*h)).collect()
-            }),
+            last_sent_heads: state
+                .last_sent_heads
+                .as_ref()
+                .map(|heads| heads.iter().map(|h| crate::PyChangeHash(*h)).collect()),
+            last_acked_heads: state
+                .last_acked_heads
+                .as_ref()
+                .map(|heads| heads.iter().map(|h| crate::PyChangeHash(*h)).collect()),
         }
     }
 }
@@ -230,7 +238,9 @@ impl PyConnectionInfo {
             last_received: info.last_received.map(|ts| ts.as_millis() as f64 / 1000.0),
             last_sent: info.last_sent.map(|ts| ts.as_millis() as f64 / 1000.0),
             state: ConnectionStateVariant::from_rust(py, &info.state),
-            docs: info.docs.iter()
+            docs: info
+                .docs
+                .iter()
                 .map(|(doc_id, state)| (doc_id.clone(), PyPeerDocState::from(state)))
                 .collect(),
         }
