@@ -104,11 +104,9 @@ Text objects are collaborative sequences that automatically merge concurrent edi
  
          # Create and modify documents - changes sync automatically!
          handle = await repo.create()
- 
-         def update_doc(doc):
-             doc["message"] = "Hello, Automerge!"
- 
-         await handle.change(update_doc)
+         
+         with handle.change() as doc:
+            doc["message"] = "Hello, Automerge!"
  
          # Read document contents using direct access
          doc = handle.doc()
