@@ -94,11 +94,9 @@ async with repo:
 handle = await repo.create()
 
 # Initialize with content
-def init_doc(doc):
+with handle.change() as doc:
     doc["title"] = "Hello"
     doc["count"] = 0
-
-await handle.change(init_doc)
 ```
 
 ### Reading a Document
@@ -117,17 +115,15 @@ if handle:
 
 ```python
 # Make changes to a document
-def update_count(doc):
+with handle.change() as doc:
     current = doc["count"]
     doc["count"] = current + 1
-
-await handle.change(update_count)
 ```
 
 ### Important: Read vs Write Access
 
 - **Reading**: Use `doc = handle.doc()` for read-only access with Python dict-like syntax
-- **Writing**: Use `await handle.change(callback)` for mutations
+- **Writing**: Use `with handle.change() as doc:` for mutations
 - Documents from `doc()` are read-only and will raise errors on write attempts
 - Use `change()` for all mutations
 
