@@ -32,9 +32,6 @@ features = ["pyo3/extension-module"]
 module-name = "automerge._automerge"
 
 [tool.pytest.ini_options]
-markers = [
-    "integration: marks tests as integration tests (may require external services)",
-]
 
 [dependency-groups]
 dev = [
