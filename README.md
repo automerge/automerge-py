@@ -167,68 +167,14 @@ pip install pytest pytest-asyncio "moto[server]"
 Run tests:
 
 ```bash
-# Run all unit tests (uses moto server for S3 mocking, no AWS credentials needed)
+# Run all tests
 pytest tests/ -v
 
 # Run specific test file
 pytest tests/test_s3_storage_mock.py -v
-
-# Exclude integration tests explicitly
-pytest tests/ -m "not integration" -v
 ```
 
 > **Note**: The S3 mock tests use moto's server mode (`ThreadedMotoServer`) instead of
 > decorators because aiobotocore uses aiohttp for HTTP requests, which bypasses moto's
 > standard patching. Server mode runs a local S3-compatible HTTP endpoint that works
 > correctly with async clients.
-
-#### S3 Integration Tests
-
-The S3 storage adapter has both unit tests (using moto) and integration tests against real AWS S3. Unit tests always run; integration tests are skipped unless configured.
-
-To run integration tests against real S3:
-
-```bash
-export S3_BUCKET_NAME=your-test-bucket
-export AWS_REGION=us-east-1
-export S3_TEST_PREFIX=automerge-py-tests
-pytest tests/test_s3_storage.py -v
-```
-
-#### CI Configuration
-
-For GitHub Actions, configure secrets and run integration tests conditionally:
-
-```yaml
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install maturin && maturin develop
-      - run: pip install -e ".[all]" pytest pytest-asyncio "moto[server]"
-      - run: pytest tests/ -m "not integration" -v
-
-  integration:
-    runs-on: ubuntu-latest
-    # Only run on main branch or when labeled
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install maturin && maturin develop
-      - run: pip install -e ".[all]" pytest pytest-asyncio
-      - name: Run S3 integration tests
-        env:
-          S3_BUCKET_NAME: ${{ secrets.S3_TEST_BUCKET }}
-          AWS_REGION: us-east-1
-          S3_TEST_PREFIX: ci/${{ github.run_id }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        run: pytest tests/test_s3_storage.py -v
-```
