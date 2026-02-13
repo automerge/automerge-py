@@ -15,10 +15,10 @@ import pytest
 pytest.importorskip("aiobotocore", reason="automerge[s3] extra not installed")
 moto = pytest.importorskip("moto", reason="moto[server] not installed")
 
-import pytest_asyncio
-from moto.server import ThreadedMotoServer
+import pytest_asyncio  # noqa: E402
+from moto.server import ThreadedMotoServer  # noqa: E402
 
-from automerge._automerge import StorageKey
+from automerge._automerge import StorageKey  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -78,6 +78,7 @@ async def s3_storage(endpoint_url, bucket_name, region):
             "aws_secret_access_key": "testing",
         },
     )
+
 
 @pytest.mark.asyncio
 async def test_put_and_load(s3_storage):
