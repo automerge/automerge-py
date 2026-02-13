@@ -51,8 +51,8 @@ jobs:
         shell: bash
         run: |
           set -e
-          pip install automerge --find-links dist --force-reinstall --no-index
-          pip install pytest
+          pip install "automerge[s3]" --find-links dist --force-reinstall --no-index
+          pip install pytest pytest-asyncio "moto[server]"
           pytest
       - name: pytest
         if: ${{ !startsWith(matrix.target, 'x86') && matrix.target != 'ppc64' }}
@@ -64,10 +64,10 @@ jobs:
           install: |
             apt-get update
             apt-get install -y --no-install-recommends python3 python3-pip
-            pip3 install -U pip pytest pytest-asyncio
+            pip3 install -U pip pytest pytest-asyncio "moto[server]"
           run: |
             set -e
-            pip3 install automerge --find-links dist --force-reinstall --no-index
+            pip3 install "automerge[s3]" --find-links dist --force-reinstall --no-index
             pytest
 
   windows:
@@ -98,8 +98,8 @@ jobs:
         shell: bash
         run: |
           set -e
-          pip install automerge --find-links dist --force-reinstall --no-index
-          pip install pytest
+          pip install "automerge[s3]" --find-links dist --force-reinstall --no-index
+          pip install pytest pytest-asyncio "moto[server]"
           pytest
 
   macos:
@@ -128,8 +128,8 @@ jobs:
         shell: bash
         run: |
           set -e
-          pip install automerge --find-links dist --force-reinstall --no-index
-          pip install pytest
+          pip install "automerge[s3]" --find-links dist --force-reinstall --no-index
+          pip install pytest pytest-asyncio "moto[server]"
           pytest
 
   sdist:
