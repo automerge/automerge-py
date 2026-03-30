@@ -60,11 +60,15 @@ class WebSocketClientTransport:
         self._closed = False
 
     @classmethod
-    async def connect(cls, uri: str) -> "WebSocketClientTransport":
+    async def connect(
+        cls, uri: str, *, extra_headers=None
+    ) -> "WebSocketClientTransport":
         """Connect to a WebSocket server.
 
         Args:
             uri: The WebSocket URI to connect to (e.g., "ws://localhost:8080")
+            extra_headers: Optional headers to include in the WebSocket handshake
+                (e.g., {"Authorization": "Bearer <token>"})
 
         Returns:
             A connected WebSocketClientTransport instance
@@ -73,7 +77,7 @@ class WebSocketClientTransport:
             >>> transport = await WebSocketClientTransport.connect("ws://localhost:8080")
             >>> await repo.connect(transport)
         """
-        websocket = await connect(uri)
+        websocket = await connect(uri, extra_headers=extra_headers)
         return cls(websocket)
 
     async def send(self, msg: bytes):
