@@ -344,3 +344,41 @@ async def test_websocket_binary_message_validation():
 
             await transport.close()
             await asyncio.sleep(0.1)
+
+
+@pytest.mark.asyncio
+async def test_websocket_connect_with_extra_headers():
+    """Test that extra_headers can be passed to WebSocketClientTransport.connect."""
+    storage_a = InMemoryStorage()
+    storage_b = InMemoryStorage()
+
+    repo_a = await Repo.load(storage_a)
+    repo_b = await Repo.load(storage_b)
+
+    async with repo_a, repo_b:
+        async with WebSocketServer(repo_b, "localhost", 8775):
+            await asyncio.sleep(0.1)
+
+            # Connect with extra headers
+            transport = await WebSocketClientTransport.connect(
+                "ws://localhost:8775",
+                extra_headers={"Authorization": "Bearer test-token"},
+            )
+            _conn_task = asyncio.create_task(repo_a.connect(transport))
+            await asyncio.sleep(0.5)
+
+            # Create a document and verify sync works with extra headers
+            handle_a = await repo_a.create()
+
+            with handle_a.change() as doc:
+                doc["auth"] = "yes"
+            await asyncio.sleep(0.5)
+
+            handle_b = await repo_b.find(handle_a.url)
+            assert handle_b is not None, "Document should have synced to server"
+
+            doc_b = handle_b.doc()
+            assert doc_b["auth"] == "yes"
+
+            await transport.close()
+            await asyncio.sleep(0.1)
