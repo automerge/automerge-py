@@ -473,6 +473,9 @@ class Repo:
         self._send_queues: Dict[ConnectionId, asyncio.Queue] = {}
         self._conn_finished_futures: Dict[ConnectionId, asyncio.Future] = {}
 
+        # Pending IO task tracking (for clean shutdown)
+        self._pending_io_tasks: set = set()
+
     @classmethod
     async def load(
         cls,
@@ -621,6 +624,12 @@ class Repo:
             if not future.done():
                 future.cancel()
 
+        # Wait for pending IO tasks (especially storage writes) to complete
+        # before cancelling other tasks. This ensures data is persisted to disk
+        # even on platforms with different asyncio scheduling (e.g. Windows ProactorEventLoop).
+        if self._pending_io_tasks:
+            await asyncio.gather(*list(self._pending_io_tasks), return_exceptions=True)
+
         # Cancel all remaining tasks
         for task in list(self._recv_tasks.values()):
             task.cancel()
@@ -692,7 +701,7 @@ class Repo:
                 # Execute new IO tasks
                 for io_task in results.new_tasks:
                     # Execute task and feed result back to Hub
-                    asyncio.create_task(self._handle_io_task(io_task))
+                    self._create_io_task(self._handle_io_task(io_task))
 
                 # Complete pending commands
                 for cmd_id, cmd_result in results.completed_commands.items():
@@ -714,7 +723,7 @@ class Repo:
 
                 # Handle document actor spawning
                 for spawn_args in results.spawn_actors:
-                    asyncio.create_task(self._spawn_document_actor(spawn_args))
+                    self._create_io_task(self._spawn_document_actor(spawn_args))
 
                 # Handle messages to document actors
                 for actor_id, msg in results.actor_messages:
@@ -875,6 +884,23 @@ class Repo:
 
         raise ValueError(f"Unknown IO task action type: {type(action)}")
 
+    def _create_io_task(self, coro) -> asyncio.Task:
+        """Create an asyncio task and track it for cleanup during shutdown.
+
+        This ensures that pending IO operations (especially storage writes)
+        complete before the repo shuts down, preventing data loss.
+
+        Args:
+            coro: The coroutine to run as a task
+
+        Returns:
+            The created asyncio Task
+        """
+        task = asyncio.create_task(coro)
+        self._pending_io_tasks.add(task)
+        task.add_done_callback(self._pending_io_tasks.discard)
+        return task
+
     async def _handle_io_task(self, io_task: IoTask):
         """Execute an IO task and feed the result back to the Hub.
 
@@ -934,7 +960,7 @@ class Repo:
 
         # Handle initial IO tasks from spawn
         for io_task in initial_result.io_tasks:
-            asyncio.create_task(self._handle_doc_actor_io(actor_id, io_task))
+            self._create_io_task(self._handle_doc_actor_io(actor_id, io_task))
 
         # Handle initial outgoing messages
         for msg in initial_result.outgoing_messages:
@@ -942,7 +968,7 @@ class Repo:
             await self._hub_event_queue.put(HubEvent.actor_message(actor_id, msg))
 
         # Start the actor's control loop
-        task = asyncio.create_task(self._document_actor_loop(actor_id))
+        task = self._create_io_task(self._document_actor_loop(actor_id))
         self._doc_actor_tasks[actor_id] = task
 
     async def _document_actor_loop(self, actor_id: DocumentActorId):
@@ -967,7 +993,7 @@ class Repo:
 
                 # Execute IO tasks
                 for io_task in result.io_tasks:
-                    asyncio.create_task(self._handle_doc_actor_io(actor_id, io_task))
+                    self._create_io_task(self._handle_doc_actor_io(actor_id, io_task))
 
                 # Send outgoing messages to Hub
                 for outgoing_msg in result.outgoing_messages:
@@ -1013,7 +1039,7 @@ class Repo:
 
                 # Execute any new IO tasks that resulted
                 for new_io_task in doc_result.io_tasks:
-                    asyncio.create_task(
+                    self._create_io_task(
                         self._handle_doc_actor_io(actor_id, new_io_task)
                     )
 
@@ -1370,7 +1396,7 @@ class ChangeContext:
             # Always process side effects - DocActorResult may contain effects
             # even if the transaction was rolled back
             for io_task in result.io_tasks:
-                asyncio.create_task(
+                self._handle._repo._create_io_task(
                     self._handle._repo._handle_doc_actor_io(
                         self._handle._actor_id, io_task
                     )
