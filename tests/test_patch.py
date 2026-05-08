@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from automerge.core import ROOT, Document, ObjType, ScalarType
@@ -84,9 +86,7 @@ def test_delete_seq():
     assert p.length == 1
 
 
-@pytest.mark.skip(
-    reason="Counter scalars hit todo!() in PyScalarValue — pre-existing limitation"
-)
+@pytest.mark.skip(reason="Counter scalars not yet supported in PyScalarValue")
 def test_increment():
     doc = Document()
     with doc.transaction() as tx:
@@ -136,6 +136,54 @@ def test_eq():
     assert patches[0] == patches[0]
 
 
+def test_concurrent_put_conflict_true():
+    """Concurrent puts whose winner replaces the visible value emit a put with conflict=True."""
+    # Higher actor id wins, so make B's value the winner.
+    a = Document(actor_id=b"\x01" * 16)
+    with a.transaction() as tx:
+        tx.put(ROOT, "k", ScalarType.Str, "init")
+    b = a.fork()
+    b.set_actor(b"\x02" * 16)
+    with a.transaction() as tx:
+        tx.put(ROOT, "k", ScalarType.Str, "from-a")
+    with b.transaction() as tx:
+        tx.put(ROOT, "k", ScalarType.Str, "from-b")
+    before = a.get_heads()
+    a.merge(b)
+    patches = a.diff(before, a.get_heads())
+    p = next(p for p in patches if p.path == ["k"])
+    assert p.action == "put"
+    assert p.conflict is True
+    assert p.value == (ScalarType.Str, "from-b")
+
+
+def test_conflict_action_when_winner_unchanged():
+    """When concurrent puts conflict but the winning value equals the existing one,
+    automerge emits a `conflict` action (not `put`) since the visible value didn't change."""
+    # Higher actor id wins, so make A's value the winner — A's visible value doesn't change.
+    a = Document(actor_id=b"\x02" * 16)
+    with a.transaction() as tx:
+        tx.put(ROOT, "k", ScalarType.Str, "init")
+    b = a.fork()
+    b.set_actor(b"\x01" * 16)
+    with a.transaction() as tx:
+        tx.put(ROOT, "k", ScalarType.Str, "a-wins")
+    with b.transaction() as tx:
+        tx.put(ROOT, "k", ScalarType.Str, "b-loses")
+    before = a.get_heads()
+    a.merge(b)
+    patches = a.diff(before, a.get_heads())
+    p = next(p for p in patches if p.action == "conflict")
+    assert p.path == ["k"]
+    # `conflict` action carries no value/conflict-flag/length/marks.
+    assert p.value is None
+    assert p.conflict is None
+    assert p.length is None
+    assert p.marks is None
+    d = p.to_dict()
+    assert d == {"action": "conflict", "path": ["k"]}
+
+
 @pytest.mark.asyncio
 async def test_patch_via_repo():
     """Integration: patches arrive via Repo change event with correct shape."""
@@ -148,7 +196,6 @@ async def test_patch_via_repo():
         h.on("change", captured.append)
         with h.change() as doc:
             doc["title"] = "hello"
-        import asyncio
 
         await asyncio.sleep(0.1)
     assert len(captured) == 1

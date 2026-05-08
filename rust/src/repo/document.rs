@@ -222,6 +222,35 @@ impl PyWithDocResult {
 
 // ===== Document Actor =====
 
+/// Run `f` against the actor and return the patches the underlying document
+/// produced during the call.
+///
+/// We compute patches at the binding layer because `samod_core`'s
+/// `DocActorResult` does not currently include them.
+
+fn with_patches<F, R>(
+    actor: &mut samod_core::actors::document::DocumentActor,
+    f: F,
+) -> PyResult<(R, Vec<crate::PyPatch>)>
+where
+    F: FnOnce(&mut samod_core::actors::document::DocumentActor) -> PyResult<R>,
+{
+    let before = actor.document().get_heads();
+    let result = f(actor)?;
+    let after = actor.document().get_heads();
+    let patches = if before != after {
+        actor
+            .document()
+            .diff(&before, &after)
+            .into_iter()
+            .map(crate::PyPatch)
+            .collect()
+    } else {
+        vec![]
+    };
+    Ok((result, patches))
+}
+
 /// Wrapper for samod_core::actors::document::DocumentActor
 ///
 /// The document actor manages a single Automerge document, handling
@@ -258,29 +287,16 @@ impl PyDocumentActor {
         let timestamp = samod_core::UnixTimestamp::from_millis((now * 1000.0) as u128);
         let mut actor = self.inner.lock().unwrap();
 
-        let before_heads = actor.document().get_heads();
-
-        let result = actor
-            .handle_message(timestamp, msg.inner.clone())
-            .map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                    "Document actor error: {:?}",
-                    e
-                ))
-            })?;
-
-        let after_heads = actor.document().get_heads();
-
-        let patches = if before_heads != after_heads {
+        let (result, patches) = with_patches(&mut actor, |actor| {
             actor
-                .document()
-                .diff(&before_heads, &after_heads)
-                .into_iter()
-                .map(crate::PyPatch)
-                .collect()
-        } else {
-            vec![]
-        };
+                .handle_message(timestamp, msg.inner.clone())
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "Document actor error: {:?}",
+                        e
+                    ))
+                })
+        })?;
 
         Ok(PyDocActorResult {
             inner: result,
@@ -300,28 +316,16 @@ impl PyDocumentActor {
         // Convert PyIoResult to Rust IoResult<DocumentIoResult>
         let rust_io_result = io_result.to_document_io_result()?;
 
-        let before_heads = actor.document().get_heads();
-
-        let result = actor
-            .handle_io_complete(timestamp, rust_io_result)
-            .map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
-                    "Document actor error: {:?}",
-                    e
-                ))
-            })?;
-        let after_heads = actor.document().get_heads();
-
-        let patches = if before_heads != after_heads {
+        let (result, patches) = with_patches(&mut actor, |actor| {
             actor
-                .document()
-                .diff(&before_heads, &after_heads)
-                .into_iter()
-                .map(crate::PyPatch)
-                .collect()
-        } else {
-            vec![]
-        };
+                .handle_io_complete(timestamp, rust_io_result)
+                .map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                        "Document actor error: {:?}",
+                        e
+                    ))
+                })
+        })?;
 
         Ok(PyDocActorResult {
             inner: result,

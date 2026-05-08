@@ -37,6 +37,7 @@ from automerge._automerge import (
     IoTask,
     LoaderStateLoaded,
     LoaderStateNeedIo,
+    Patch,
     PeerId,
     SamodLoader,
     SendAction,
@@ -1017,6 +1018,8 @@ class Repo:
             traceback.print_exc()
         finally:
             # Clean up
+            if self._actor_to_doc[actor_id] in self._doc_event_callbacks:
+                del self._doc_event_callbacks[self._actor_to_doc[actor_id]]
             if actor_id in self._doc_actors:
                 del self._doc_actors[actor_id]
             if actor_id in self._doc_actor_queues:
@@ -1340,9 +1343,9 @@ class Repo:
     def _on_doc_event(
         self, document_id: DocumentId, event: str, callback: Callable
     ) -> None:
-        if document_id not in self._doc_event_callbacks:
-            self._doc_event_callbacks[document_id] = {event: []}
-        self._doc_event_callbacks[document_id][event].append(callback)
+        self._doc_event_callbacks.setdefault(document_id, {}).setdefault(
+            event, []
+        ).append(callback)
 
     def _off_doc_event(
         self, document_id: DocumentId, event: str, callback: Callable
@@ -1560,10 +1563,6 @@ class DocHandle:
         """
         self._repo._on_doc_event(self._document_id, event, callback)
 
-        # if event not in self._event_callbacks:
-        #     self._event_callbacks[event] = []
-        # self._event_callbacks[event].append(callback)
-
     def off(self, event: str, callback: Callable) -> None:
         """Remove a callback for a document event.
 
@@ -1580,9 +1579,8 @@ class DocHandle:
             >>> handle.off("change", on_change)
         """
         self._repo._off_doc_event(self._document_id, event, callback)
-        # if event in self._event_callbacks and callback in self._event_callbacks[event]:
-        #     self._event_callbacks[event].remove(callback)
 
+    # TODO: is this dead code?
     def _emit(self, event: str, *args) -> None:
         """Emit an event to all registered callbacks.
 
@@ -1590,15 +1588,7 @@ class DocHandle:
             event: The event name to emit
             *args: Arguments to pass to the callbacks
         """
-        self._repo._emit_doc_event(self._document_id, event, args)
-        # if event in self._event_callbacks:
-        #     for callback in self._event_callbacks[event]:
-        #         try:
-        #             callback(*args)
-        #         except Exception as e:
-        #             # Log the error but don't let it propagate
-        #             # This prevents one bad callback from breaking others
-        #             print(f"Error in {event} callback: {e}")
+        self._repo._emit_doc_event(self._document_id, event, *args)
 
     def __repr__(self) -> str:
         return f"DocHandle(actor_id={self._actor_id}, document_id={self._document_id})"

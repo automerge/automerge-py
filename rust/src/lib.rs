@@ -1386,14 +1386,18 @@ impl PyChange {
     }
 }
 
-fn prop_to_py(py: Python<'_>, prop: &Prop) -> PyObject {
+fn prop_to_py(py: Python<'_>, prop: &Prop) -> PyResult<PyObject> {
     match prop {
-        Prop::Map(key) => key.into_pyobject(py).unwrap().into_any().unbind(),
-        Prop::Seq(key) => key.into_pyobject(py).unwrap().into_any().unbind(),
+        Prop::Map(key) => Ok(key.into_pyobject(py)?.into_any().unbind()),
+        Prop::Seq(key) => Ok(key.into_pyobject(py)?.into_any().unbind()),
     }
 }
 
-fn flatten_path(py: Python<'_>, path: &[(am::ObjId, Prop)], tail: Option<&Prop>) -> Vec<PyObject> {
+fn flatten_path(
+    py: Python<'_>,
+    path: &[(am::ObjId, Prop)],
+    tail: Option<&Prop>,
+) -> PyResult<Vec<PyObject>> {
     path.iter()
         .map(|(_, prop)| prop_to_py(py, prop))
         .chain(tail.map(|p| prop_to_py(py, p)))
@@ -1406,8 +1410,16 @@ pub struct PyPatch(pub am::Patch);
 
 #[pymethods]
 impl PyPatch {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self.0)
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        let path = self.path(py)?;
+        let path_repr: String = pyo3::types::PyList::new(py, path)?
+            .repr()?
+            .extract()?;
+        Ok(format!(
+            "Patch(action={}, path={})",
+            self.action(),
+            path_repr
+        ))
     }
 
     #[getter]
@@ -1426,7 +1438,7 @@ impl PyPatch {
     }
 
     #[getter]
-    fn path(&self, py: Python<'_>) -> Vec<PyObject> {
+    fn path(&self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
         let tail = match &self.0.action {
             PatchAction::PutMap { key, .. } => Some(Prop::Map(key.clone())),
             PatchAction::PutSeq { index, .. } => Some(Prop::Seq(*index)),
@@ -1543,7 +1555,7 @@ impl PyPatch {
     fn to_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
         let dict = pyo3::types::PyDict::new(py);
         dict.set_item("action", self.action())?;
-        dict.set_item("path", self.path(py))?;
+        dict.set_item("path", self.path(py)?)?;
         if let Some(v) = self.value(py)? {
             dict.set_item("value", v)?;
         }
@@ -1553,7 +1565,7 @@ impl PyPatch {
         if let Some(v) = self.length() {
             dict.set_item("length", v)?;
         }
-        if let Ok(Some(v)) = self.marks(py) {
+        if let Some(v) = self.marks(py)? {
             dict.set_item("marks", v)?;
         }
         Ok(dict.into_any().unbind())
