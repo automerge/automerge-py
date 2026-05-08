@@ -116,6 +116,11 @@ Text objects are collaborative sequences that automatically merge concurrent edi
          # Read document contents using direct access
          doc = handle.doc()
          print(f"Message: {doc['message']}")
+
+         # If a peer was updating the document:
+         def on_change(patches):
+             print(f"got {len(patches)} remote patches")
+         handle.on("change", on_change)
  ```
  
  See the [examples/](examples/) directory for more complete examples and usage patterns.

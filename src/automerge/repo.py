@@ -1541,6 +1541,8 @@ class DocHandle:
 
     def on(self, event: str, callback: Callable) -> None:
         """Register a callback for a document event.
+           Will fire for both local changes (via `handle.change()`)
+           and remote changes received via sync or from storage.
 
         Args:
             event: The event name (currently only "change" is supported)
