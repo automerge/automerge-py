@@ -1,7 +1,9 @@
 import asyncio
+from typing import List
 
 import pytest
 
+from automerge._automerge import Patch
 from automerge.repo import InMemoryStorage, Repo
 from automerge.transports import InMemoryTransport
 
@@ -38,17 +40,21 @@ async def test_document_sync_basic_with_on():
         h_b = await r_b.find(h_a.url)
 
         # set a listener on h_b to verify that changes from Repo A trigger events in Repo B
-        callbacks = []
+        patch_list = []
 
-        def on_change(patches):
-            callbacks.append(patches)
+        def on_change(patches: List[Patch]):
+            nonlocal patch_list
+            print(f"patches rec {len(patches)}")
+            for p in patches:
+                print(p.action, p.path, p.value)
+            patch_list += patches
 
         h_b.on("change", on_change)
 
         # give time for changes to sync and events to trigger
         await asyncio.sleep(0.1)
 
-        assert len(callbacks) == 0
+        assert len(patch_list) == 0
 
         # make some changes
         with h_a.change() as doc:
@@ -62,8 +68,7 @@ async def test_document_sync_basic_with_on():
         assert h_b.doc()["title"] == "Hello again"
 
         # verify that the change event was triggered in Repo B
-        assert len(callbacks) > 0
-        print(callbacks)
+        assert len(patch_list) > 0
 
     await r_a.stop()
     await r_b.stop()

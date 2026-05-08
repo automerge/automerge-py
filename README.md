@@ -119,7 +119,7 @@ Text objects are collaborative sequences that automatically merge concurrent edi
 
          # If a peer was updating the document:
          def on_change(patches):
-             print(f"got {len(patches)} remote patches")
+             print(f"got patches for {[p.path for p in patches]}")
          handle.on("change", on_change)
  ```
  

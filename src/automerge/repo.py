@@ -1543,7 +1543,7 @@ class DocHandle:
         """Register a callback for a document event.
            Will fire for both local changes (via `handle.change()`)
            and remote changes received via sync or from storage.
-
+           patches will be a Patch object, with p.action, p.path, p.value.
         Args:
             event: The event name (currently only "change" is supported)
             callback: The function to call when the event occurs.
