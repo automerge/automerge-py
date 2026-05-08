@@ -1471,7 +1471,6 @@ class DocHandle:
         self._actor_id = actor_id
         self._document_id = document_id
         self._repo = repo
-        # self._event_callbacks: Dict[str, List[Callable]] = {}
 
     @property
     def url(self) -> AutomergeUrl:
