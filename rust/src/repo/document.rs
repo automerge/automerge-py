@@ -101,6 +101,9 @@ impl From<samod_core::actors::DocToHubMsg> for PyDocToHubMsg {
 #[pyclass(name = "DocActorResult")]
 pub struct PyDocActorResult {
     pub(crate) inner: samod_core::actors::document::DocActorResult,
+
+    #[pyo3(get)]
+    pub patches: Vec<crate::PyPatch>,
 }
 
 #[pymethods]
@@ -245,6 +248,7 @@ impl PyDocumentActor {
             },
             PyDocActorResult {
                 inner: initial_result,
+                patches: vec![],
             },
         ))
     }
@@ -253,6 +257,9 @@ impl PyDocumentActor {
     fn handle_message(&self, now: f64, msg: &PyHubToDocMsg) -> PyResult<PyDocActorResult> {
         let timestamp = samod_core::UnixTimestamp::from_millis((now * 1000.0) as u128);
         let mut actor = self.inner.lock().unwrap();
+
+        let before_heads = actor.document().get_heads();
+
         let result = actor
             .handle_message(timestamp, msg.inner.clone())
             .map_err(|e| {
@@ -261,7 +268,24 @@ impl PyDocumentActor {
                     e
                 ))
             })?;
-        Ok(PyDocActorResult { inner: result })
+
+        let after_heads = actor.document().get_heads();
+
+        let patches = if before_heads != after_heads {
+            actor
+                .document()
+                .diff(&before_heads, &after_heads)
+                .into_iter()
+                .map(crate::PyPatch)
+                .collect()
+        } else {
+            vec![]
+        };
+
+        Ok(PyDocActorResult {
+            inner: result,
+            patches,
+        })
     }
 
     /// Handle completion of an IO operation
@@ -276,6 +300,8 @@ impl PyDocumentActor {
         // Convert PyIoResult to Rust IoResult<DocumentIoResult>
         let rust_io_result = io_result.to_document_io_result()?;
 
+        let before_heads = actor.document().get_heads();
+
         let result = actor
             .handle_io_complete(timestamp, rust_io_result)
             .map_err(|e| {
@@ -284,7 +310,23 @@ impl PyDocumentActor {
                     e
                 ))
             })?;
-        Ok(PyDocActorResult { inner: result })
+        let after_heads = actor.document().get_heads();
+
+        let patches = if before_heads != after_heads {
+            actor
+                .document()
+                .diff(&before_heads, &after_heads)
+                .into_iter()
+                .map(crate::PyPatch)
+                .collect()
+        } else {
+            vec![]
+        };
+
+        Ok(PyDocActorResult {
+            inner: result,
+            patches,
+        })
     }
 
     /// Get a read-only document reference backed by this DocumentActor

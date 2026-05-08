@@ -1386,7 +1386,7 @@ impl PyChange {
 
 #[pyclass(name = "Patch")]
 #[derive(Debug, Clone)]
-struct PyPatch(am::Patch);
+pub struct PyPatch(am::Patch);
 
 #[pymethods]
 impl PyPatch {
