@@ -37,7 +37,6 @@ from automerge._automerge import (
     IoTask,
     LoaderStateLoaded,
     LoaderStateNeedIo,
-    Patch,
     PeerId,
     SamodLoader,
     SendAction,
