@@ -1,10 +1,10 @@
 [build-system]
-requires = ["maturin>=1.4,<2.0"]
+requires = ["maturin>=1.13,<2.0"]
 build-backend = "maturin"
 
 [project]
 name = "automerge"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
@@ -17,14 +17,14 @@ version = "0.2.0.dev4"
 # Or all extras: pip install automerge[all]
 [project.optional-dependencies]
 websocket = [
-    "websockets>=12.0",
+    "websockets>=16.0",
 ]
 s3 = [
-    "aiobotocore>=2.9.0",
+    "aiobotocore>=3.7.0",
 ]
 all = [
-    "websockets>=12.0",
-    "aiobotocore>=2.9.0",
+    "websockets>=16.0",
+    "aiobotocore>=3.7.0",
 ]
 
 [tool.maturin]
