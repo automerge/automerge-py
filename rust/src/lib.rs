@@ -5,7 +5,8 @@ use std::{
 };
 
 use ::automerge::{
-    self as am, transaction::Transactable, ChangeHash, ObjType, Prop, ReadDoc, ScalarValue,
+    self as am, transaction::Transactable, ChangeHash, ObjType, PatchAction, Prop, ReadDoc,
+    ScalarValue,
 };
 use am::{
     marks::{ExpandMark, Mark},
@@ -1049,6 +1050,7 @@ fn _automerge(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Transaction>()?;
     m.add_class::<PySyncState>()?;
     m.add_class::<PyMessage>()?;
+    m.add_class::<PyPatch>()?;
 
     // Enums
     m.add_class::<PyObjType>()?;
@@ -1384,13 +1386,188 @@ impl PyChange {
     }
 }
 
+fn prop_to_py(py: Python<'_>, prop: &Prop) -> PyResult<PyObject> {
+    match prop {
+        Prop::Map(key) => Ok(key.into_pyobject(py)?.into_any().unbind()),
+        Prop::Seq(key) => Ok(key.into_pyobject(py)?.into_any().unbind()),
+    }
+}
+
+fn flatten_path(
+    py: Python<'_>,
+    path: &[(am::ObjId, Prop)],
+    tail: Option<&Prop>,
+) -> PyResult<Vec<PyObject>> {
+    path.iter()
+        .map(|(_, prop)| prop_to_py(py, prop))
+        .chain(tail.map(|p| prop_to_py(py, p)))
+        .collect()
+}
+
 #[pyclass(name = "Patch")]
 #[derive(Debug, Clone)]
-struct PyPatch(am::Patch);
+pub struct PyPatch(pub am::Patch);
 
 #[pymethods]
 impl PyPatch {
-    fn __repr__(&self) -> String {
-        format!("{:?}", self.0)
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        let path = self.path(py)?;
+        let path_repr: String = pyo3::types::PyList::new(py, path)?
+            .repr()?
+            .extract()?;
+        Ok(format!(
+            "Patch(action={}, path={})",
+            self.action(),
+            path_repr
+        ))
+    }
+
+    #[getter]
+    fn action(&self) -> &'static str {
+        match &self.0.action {
+            PatchAction::PutMap { .. } => "put",
+            PatchAction::PutSeq { .. } => "put",
+            PatchAction::Insert { .. } => "insert",
+            PatchAction::SpliceText { .. } => "splice",
+            PatchAction::Increment { .. } => "inc",
+            PatchAction::DeleteMap { .. } => "del",
+            PatchAction::DeleteSeq { .. } => "del",
+            PatchAction::Conflict { .. } => "conflict",
+            PatchAction::Mark { .. } => "mark",
+        }
+    }
+
+    #[getter]
+    fn path(&self, py: Python<'_>) -> PyResult<Vec<PyObject>> {
+        let tail = match &self.0.action {
+            PatchAction::PutMap { key, .. } => Some(Prop::Map(key.clone())),
+            PatchAction::PutSeq { index, .. } => Some(Prop::Seq(*index)),
+            PatchAction::Insert { index, .. } => Some(Prop::Seq(*index)),
+            PatchAction::SpliceText { index, .. } => Some(Prop::Seq(*index)),
+            PatchAction::Increment { prop, .. } => Some(prop.clone()),
+            PatchAction::DeleteMap { key } => Some(Prop::Map(key.clone())),
+            PatchAction::DeleteSeq { index, .. } => Some(Prop::Seq(*index)),
+            PatchAction::Conflict { prop } => Some(prop.clone()),
+            PatchAction::Mark { .. } => None,
+        };
+        flatten_path(py, &self.0.path, tail.as_ref())
+    }
+
+    #[getter]
+    fn value(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        match &self.0.action {
+            PatchAction::PutMap { value, .. } | PatchAction::PutSeq { value, .. } => Ok(Some(
+                PyValue(value.0.clone())
+                    .into_pyobject(py)?
+                    .into_any()
+                    .unbind(),
+            )),
+            PatchAction::Insert { values, .. } => {
+                let list = values
+                    .iter()
+                    .map(|(v, _, _)| {
+                        PyValue(v.clone())
+                            .into_pyobject(py)
+                            .map(|b| b.into_any().unbind())
+                    })
+                    .collect::<PyResult<Vec<_>>>()?;
+                Ok(Some(list.into_pyobject(py)?.into_any().unbind()))
+            }
+            PatchAction::SpliceText { value, .. } => Ok(Some(
+                value.make_string().into_pyobject(py)?.into_any().unbind(),
+            )),
+            PatchAction::Increment { value, .. } => {
+                Ok(Some(value.into_pyobject(py)?.into_any().unbind()))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    #[getter]
+    fn conflict(&self) -> Option<bool> {
+        match &self.0.action {
+            PatchAction::PutMap { conflict, .. } | PatchAction::PutSeq { conflict, .. } => {
+                Some(*conflict)
+            }
+            _ => None,
+        }
+    }
+
+    #[getter]
+    fn length(&self) -> Option<usize> {
+        match &self.0.action {
+            PatchAction::DeleteSeq { length, .. } => Some(*length),
+            _ => None,
+        }
+    }
+
+    #[getter]
+    fn marks(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        use pyo3::types::PyDict;
+        match &self.0.action {
+            PatchAction::SpliceText { marks, .. } => {
+                let Some(ms) = marks else { return Ok(None) };
+                let list = ms
+                    .iter()
+                    .map(|(name, val)| -> PyResult<PyObject> {
+                        let d = PyDict::new(py);
+                        d.set_item("name", name)?;
+                        d.set_item(
+                            "value",
+                            PyScalarValue(val.clone())
+                                .into_pyobject(py)?
+                                .into_any()
+                                .unbind(),
+                        )?;
+                        Ok(d.into_any().unbind())
+                    })
+                    .collect::<PyResult<Vec<_>>>()?;
+                Ok(Some(list.into_pyobject(py)?.into_any().unbind()))
+            }
+            PatchAction::Mark { marks } => {
+                let list = marks
+                    .iter()
+                    .map(|m| -> PyResult<PyObject> {
+                        let d = PyDict::new(py);
+                        d.set_item("start", m.start)?;
+                        d.set_item("end", m.end)?;
+                        d.set_item("name", &*m.name)?;
+                        d.set_item(
+                            "value",
+                            PyScalarValue(m.value.clone())
+                                .into_pyobject(py)?
+                                .into_any()
+                                .unbind(),
+                        )?;
+                        Ok(d.into_any().unbind())
+                    })
+                    .collect::<PyResult<Vec<_>>>()?;
+                Ok(Some(list.into_pyobject(py)?.into_any().unbind()))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn __eq__(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+
+    fn to_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("action", self.action())?;
+        dict.set_item("path", self.path(py)?)?;
+        if let Some(v) = self.value(py)? {
+            dict.set_item("value", v)?;
+        }
+        if let Some(v) = self.conflict() {
+            dict.set_item("conflict", v)?;
+        }
+        if let Some(v) = self.length() {
+            dict.set_item("length", v)?;
+        }
+        if let Some(v) = self.marks(py)? {
+            dict.set_item("marks", v)?;
+        }
+        Ok(dict.into_any().unbind())
     }
 }

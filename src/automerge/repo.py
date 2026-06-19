@@ -465,7 +465,7 @@ class Repo:
         self._actor_to_doc: Dict[
             DocumentActorId, DocumentId
         ] = {}  # Maps actor_id to document_id
-
+        self._doc_event_callbacks: Dict[DocumentId, Dict[str, List[Callable]]] = {}
         # Connection management
         self._transports: Dict[ConnectionId, Transport] = {}
         self._recv_tasks: Dict[ConnectionId, asyncio.Task] = {}
@@ -991,6 +991,11 @@ class Repo:
                 # Process message through document actor
                 result = actor.handle_message(time.time(), msg)
 
+                if result.patches:
+                    self._emit_doc_event(
+                        self._actor_to_doc[actor_id], "change", result.patches
+                    )
+
                 # Execute IO tasks
                 for io_task in result.io_tasks:
                     self._create_io_task(self._handle_doc_actor_io(actor_id, io_task))
@@ -1012,6 +1017,8 @@ class Repo:
             traceback.print_exc()
         finally:
             # Clean up
+            if self._actor_to_doc[actor_id] in self._doc_event_callbacks:
+                del self._doc_event_callbacks[self._actor_to_doc[actor_id]]
             if actor_id in self._doc_actors:
                 del self._doc_actors[actor_id]
             if actor_id in self._doc_actor_queues:
@@ -1036,6 +1043,10 @@ class Repo:
             if actor_id in self._doc_actors:
                 actor = self._doc_actors[actor_id]
                 doc_result = actor.handle_io_complete(time.time(), result)
+                if doc_result.patches:
+                    self._emit_doc_event(
+                        self._actor_to_doc[actor_id], "change", doc_result.patches
+                    )
 
                 # Execute any new IO tasks that resulted
                 for new_io_task in doc_result.io_tasks:
@@ -1328,6 +1339,29 @@ class Repo:
         # Document was found - return a handle
         return DocHandle(result.actor_id, document_id, self)
 
+    def _on_doc_event(
+        self, document_id: DocumentId, event: str, callback: Callable
+    ) -> None:
+        self._doc_event_callbacks.setdefault(document_id, {}).setdefault(
+            event, []
+        ).append(callback)
+
+    def _off_doc_event(
+        self, document_id: DocumentId, event: str, callback: Callable
+    ) -> None:
+        callbacks = self._doc_event_callbacks.get(document_id, {}).get(event)
+        if callbacks and callback in callbacks:
+            callbacks.remove(callback)
+
+    def _emit_doc_event(self, document_id: DocumentId, event: str, *args) -> None:
+        for callback in self._doc_event_callbacks.get(document_id, {}).get(event, []):
+            try:
+                callback(*args)
+            except Exception as e:
+                # Log the error but don't let it propagate
+                # This prevents one bad callback from breaking others
+                print(f"Error in {event} callback: {e}")
+
 
 class ChangeContext:
     """Context manager for document modifications.
@@ -1409,7 +1443,9 @@ class ChangeContext:
 
             # Emit change event only if there were actual changes
             if result.patches:
-                self._handle._emit("change", result.patches)
+                self._handle._repo._emit_doc_event(
+                    self._handle._document_id, "change", result.patches
+                )
         finally:
             self._guard = None
 
@@ -1434,7 +1470,6 @@ class DocHandle:
         self._actor_id = actor_id
         self._document_id = document_id
         self._repo = repo
-        self._event_callbacks: Dict[str, List[Callable]] = {}
 
     @property
     def url(self) -> AutomergeUrl:
@@ -1507,7 +1542,9 @@ class DocHandle:
 
     def on(self, event: str, callback: Callable) -> None:
         """Register a callback for a document event.
-
+           Will fire for both local changes (via `handle.change()`)
+           and remote changes received via sync or from storage.
+           patches will be a Patch object, with p.action, p.path, p.value.
         Args:
             event: The event name (currently only "change" is supported)
             callback: The function to call when the event occurs.
@@ -1522,9 +1559,7 @@ class DocHandle:
             ...     doc["key"] = "value"
             # Will print "Document changed! N patches"
         """
-        if event not in self._event_callbacks:
-            self._event_callbacks[event] = []
-        self._event_callbacks[event].append(callback)
+        self._repo._on_doc_event(self._document_id, event, callback)
 
     def off(self, event: str, callback: Callable) -> None:
         """Remove a callback for a document event.
@@ -1541,9 +1576,9 @@ class DocHandle:
             >>> # Later, to remove the listener:
             >>> handle.off("change", on_change)
         """
-        if event in self._event_callbacks and callback in self._event_callbacks[event]:
-            self._event_callbacks[event].remove(callback)
+        self._repo._off_doc_event(self._document_id, event, callback)
 
+    # TODO: is this dead code?
     def _emit(self, event: str, *args) -> None:
         """Emit an event to all registered callbacks.
 
@@ -1551,14 +1586,7 @@ class DocHandle:
             event: The event name to emit
             *args: Arguments to pass to the callbacks
         """
-        if event in self._event_callbacks:
-            for callback in self._event_callbacks[event]:
-                try:
-                    callback(*args)
-                except Exception as e:
-                    # Log the error but don't let it propagate
-                    # This prevents one bad callback from breaking others
-                    print(f"Error in {event} callback: {e}")
+        self._repo._emit_doc_event(self._document_id, event, *args)
 
     def __repr__(self) -> str:
         return f"DocHandle(actor_id={self._actor_id}, document_id={self._document_id})"
