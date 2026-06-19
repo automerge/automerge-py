@@ -42,3 +42,12 @@ def test_iterable() -> None:
     assert len(doc["map"]) == 2
     assert list(doc["map"]) == ["k", "x"]
     assert list(doc["map"].items()) == [("k", "v"), ("x", "y")]
+
+
+def test_bool_round_trip() -> None:
+    doc = Document()
+    with doc.change() as c:
+        c["flag"] = True
+        c["off"] = False
+    assert doc["flag"] is True
+    assert doc["off"] is False
