@@ -620,6 +620,49 @@ impl Document {
         })
     }
 
+    /// Apply raw Automerge changes to this document.
+    ///
+    /// Changes are parsed and verified by `Change.from_bytes()` before they
+    /// reach this method. Automerge keeps changes whose dependencies are not
+    /// available yet in its pending queue; use `get_missing_deps([])` to
+    /// inspect that queue.
+    fn apply_changes(&mut self, changes: Vec<PyRef<'_, PyChange>>) -> PyResult<()> {
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
+
+        if inner.tx.is_some() {
+            return Err(PyException::new_err(
+                "cannot apply changes with an active transaction",
+            ));
+        }
+
+        let doc = inner.doc_mut()?;
+        let changes = changes
+            .iter()
+            .map(|change| change.0.clone())
+            .collect::<Vec<_>>();
+        doc.apply_changes(changes)
+            .map_err(|e| PyException::new_err(e.to_string()))
+    }
+
+    /// Return dependencies that are referenced by pending changes or heads
+    /// but are not present in the document.
+    fn get_missing_deps(&self, heads: Vec<PyChangeHash>) -> PyResult<Vec<PyChangeHash>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        let heads = heads.iter().map(|head| head.0).collect::<Vec<_>>();
+        inner.with_doc(|doc| {
+            doc.get_missing_deps(&heads)
+                .into_iter()
+                .map(PyChangeHash)
+                .collect()
+        })
+    }
+
     fn generate_sync_message(&self, sync_state: &mut PySyncState) -> PyResult<Option<PyMessage>> {
         let inner = self
             .inner
@@ -998,7 +1041,7 @@ fn import_scalar(
         PyScalarType::Int => ScalarValue::Int(value.extract::<i64>()?),
         PyScalarType::Uint => ScalarValue::Uint(value.extract::<u64>()?),
         PyScalarType::F64 => ScalarValue::F64(value.extract::<f64>()?),
-        PyScalarType::Counter => todo!(),
+        PyScalarType::Counter => ScalarValue::counter(value.extract::<i64>()?),
         PyScalarType::Timestamp => {
             ScalarValue::Timestamp(datetime_to_timestamp(value.cast::<PyDateTime>()?)?)
         }
@@ -1047,6 +1090,7 @@ fn _automerge(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Document classes
     m.add_class::<Document>()?;
     m.add_class::<Transaction>()?;
+    m.add_class::<PyChange>()?;
     m.add_class::<PySyncState>()?;
     m.add_class::<PyMessage>()?;
 
@@ -1218,7 +1262,10 @@ impl<'py> IntoPyObject<'py> for PyScalarValue {
             ScalarValue::Int(v) => (PyScalarType::Int, v.into_pyobject(py)?.into_any()),
             ScalarValue::Uint(v) => (PyScalarType::Uint, v.into_pyobject(py)?.into_any()),
             ScalarValue::F64(v) => (PyScalarType::F64, v.into_pyobject(py)?.into_any()),
-            ScalarValue::Counter(_v) => todo!(),
+            ScalarValue::Counter(v) => (
+                PyScalarType::Counter,
+                i64::from(&v).into_pyobject(py)?.into_any(),
+            ),
             ScalarValue::Timestamp(v) => (
                 PyScalarType::Timestamp,
                 PyDateTime::from_timestamp(py, (v as f64) / 1000.0, None)
@@ -1311,6 +1358,13 @@ struct PyChange(am::Change);
 
 #[pymethods]
 impl PyChange {
+    #[staticmethod]
+    fn from_bytes(bytes: &[u8]) -> PyResult<Self> {
+        am::Change::from_bytes(bytes.to_vec())
+            .map(PyChange)
+            .map_err(|e| PyException::new_err(e.to_string()))
+    }
+
     fn __repr__(&self) -> String {
         format!("{:?}", self.0)
     }

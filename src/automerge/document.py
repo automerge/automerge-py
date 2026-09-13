@@ -557,12 +557,12 @@ def _infer_scalar_type(value: core.ScalarValue) -> core.ScalarType:
         return core.ScalarType.Str
     elif isinstance(value, bytes):
         return core.ScalarType.Bytes
+    elif isinstance(value, bool):
+        return core.ScalarType.Boolean
     elif isinstance(value, int):
         return core.ScalarType.Int
     elif isinstance(value, float):
         return core.ScalarType.F64
-    elif isinstance(value, bool):
-        return core.ScalarType.Boolean
     elif isinstance(value, datetime):
         return core.ScalarType.Timestamp
     elif value is None:
