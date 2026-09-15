@@ -1,7 +1,66 @@
+import base64
 from datetime import datetime
 from typing import List, Optional, Tuple
 
-from automerge.core import ROOT, Document, ObjType, ScalarType
+from automerge.core import Change, ROOT, Document, ObjType, ScalarType, extract
+
+
+JS_CHANGE_B64 = (
+    "hW9KgwNzpmABWQAQyKbNSA9KTuOgi2xhz8t7LAEBAAAABhUVNAFCAlYFVxZwAn0F"
+    "dGl0bGUFY291bnQHZW5hYmxlZAMDAX3WAhQCSGVsbG8gZnJvbSBKYXZhU2NyaXB0KgMA"
+)
+
+
+def test_apply_javascript_change() -> None:
+    doc = Document()
+    change = Change.from_bytes(base64.b64decode(JS_CHANGE_B64))
+
+    doc.apply_changes([change])
+
+    assert extract(doc) == {
+        "count": 42,
+        "enabled": True,
+        "title": "Hello from JavaScript",
+    }
+
+
+def test_change_from_bytes_and_missing_dependencies() -> None:
+    source = Document(actor_id=b"source")
+    with source.transaction() as tx:
+        tx.put(ROOT, "first", ScalarType.Str, "one")
+    first = source.get_last_local_change()
+    assert first is not None
+
+    with source.transaction() as tx:
+        tx.put(ROOT, "second", ScalarType.Str, "two")
+    second = source.get_last_local_change()
+    assert second is not None
+
+    target = Document(actor_id=b"target")
+    target.apply_changes([Change.from_bytes(second.raw_bytes)])
+    assert target.get_missing_deps([]) == [first.hash]
+
+    target.apply_changes([Change.from_bytes(first.raw_bytes)])
+    assert target.get_missing_deps([]) == []
+    assert extract(target) == {"first": "one", "second": "two"}
+
+
+def test_counter_round_trip_and_increment() -> None:
+    doc = Document(actor_id=b"counter")
+    with doc.transaction() as tx:
+        tx.put(ROOT, "value", ScalarType.Counter, 4)
+
+    value = doc.get(ROOT, "value")
+    assert value is not None
+    assert value[0] == (ScalarType.Counter, 4)
+
+    with doc.transaction() as tx:
+        tx.increment(ROOT, "value", 5)
+
+    value = doc.get(ROOT, "value")
+    assert value is not None
+    assert value[0] == (ScalarType.Counter, 9)
+    assert extract(doc) == {"value": 9}
 
 
 def test_get_changes() -> None:

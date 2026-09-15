@@ -620,12 +620,6 @@ impl Document {
         })
     }
 
-    /// Apply raw Automerge changes to this document.
-    ///
-    /// Changes are parsed and verified by `Change.from_bytes()` before they
-    /// reach this method. Automerge keeps changes whose dependencies are not
-    /// available yet in its pending queue; use `get_missing_deps([])` to
-    /// inspect that queue.
     fn apply_changes(&mut self, changes: Vec<PyRef<'_, PyChange>>) -> PyResult<()> {
         let mut inner = self
             .inner
@@ -647,8 +641,6 @@ impl Document {
             .map_err(|e| PyException::new_err(e.to_string()))
     }
 
-    /// Return dependencies that are referenced by pending changes or heads
-    /// but are not present in the document.
     fn get_missing_deps(&self, heads: Vec<PyChangeHash>) -> PyResult<Vec<PyChangeHash>> {
         let inner = self
             .inner
