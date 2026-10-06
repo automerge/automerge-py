@@ -30,6 +30,8 @@
   `await handle.change(callback)` API. Changes commit on successful exit and
   roll back on exceptions; do not use `await` inside the change block.
 - Updated the Rust Automerge dependency to 0.7.2 and PyO3 to 0.27.2.
+- Enabled Python's stable ABI (`abi3`) for CPython wheels, targeting Python 3.10
+  and newer.
 - Updated minimum optional dependencies to `websockets>=16.0` and
   `aiobotocore>=3.7.0`; source builds now require `maturin>=1.13,<2.0`.
 
@@ -37,7 +39,8 @@
 
 - Track and await pending repository I/O during shutdown, including storage
   writes, to avoid abandoning pending persistence work.
-- Updated Intel macOS wheel builds to use the `macos-15-intel` runner.
+- Updated Intel macOS wheel builds to use the `macos-15-intel` runner, and aligned
+  release builds with the Python 3.10 minimum.
 - Pinned Ruff in CI, formatted README Python examples, and explicitly preserved
   the previous default lint rules to prevent unexpected tooling upgrades from
   breaking checks.
