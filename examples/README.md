@@ -81,8 +81,12 @@ repo = await Repo.load(storage)
 
 # Connect to server
 async with repo:
-    transport = await WebSocketClientTransport.connect("ws://localhost:8080")
-    await repo.connect(transport)
+    url = "ws://localhost:8080"
+    dialer = await repo.add_dialer(
+        url, connect=lambda: WebSocketClientTransport.connect(url)
+    )
+    await dialer.wait_connected()
+    await asyncio.sleep(3600)  # Keep syncing; repo shutdown closes the dialer.
 ```
 
 ## Document Operations

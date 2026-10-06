@@ -174,11 +174,9 @@ class TestAnnouncePolicyIntegration:
     """
 
     @pytest.mark.asyncio
-    async def test_policy_consulted_on_connection(self):
+    async def test_policy_consulted_on_connection(self, memory_connection):
         """Test that announce policy is consulted when peers connect."""
         import asyncio
-
-        from automerge.transports import InMemoryTransport
 
         # Track policy calls
         policy_calls = []
@@ -203,10 +201,7 @@ class TestAnnouncePolicyIntegration:
             repo_b = await Repo.load(storage_b)
 
             async with repo_b:
-                transport_a, transport_b = InMemoryTransport.create_pair()
-
-                conn_task_a = asyncio.create_task(repo_a.connect(transport_a))
-                conn_task_b = asyncio.create_task(repo_b.accept(transport_b))
+                dialer, listener = await memory_connection(repo_a, repo_b)
 
                 # Wait for connection and announce
                 await asyncio.sleep(1.0)
@@ -222,29 +217,12 @@ class TestAnnouncePolicyIntegration:
                     "Policy should have been called for our document"
                 )
 
-                # Clean up
-                transport_a.close()
-                transport_b.close()
-                await asyncio.sleep(0.1)
-                conn_task_a.cancel()
-                conn_task_b.cancel()
-
-                try:
-                    await conn_task_a
-                except asyncio.CancelledError:
-                    pass
-
-                try:
-                    await conn_task_b
-                except asyncio.CancelledError:
-                    pass
+                await asyncio.gather(dialer.close(), listener.close())
 
     @pytest.mark.asyncio
-    async def test_policy_called_with_deny_result(self):
+    async def test_policy_called_with_deny_result(self, memory_connection):
         """Test that deny policy prevents document from being announced and synced."""
         import asyncio
-
-        from automerge.transports import InMemoryTransport
 
         # Track policy calls
         policy_calls = []
@@ -268,9 +246,7 @@ class TestAnnouncePolicyIntegration:
                 doc["message"] = "Test document"
 
             # Connect the repos
-            transport_a, transport_b = InMemoryTransport.create_pair()
-            conn_task_a = asyncio.create_task(repo_a.connect(transport_a))
-            conn_task_b = asyncio.create_task(repo_b.accept(transport_b))
+            dialer, listener = await memory_connection(repo_a, repo_b)
 
             # Wait for connection and policy check
             await asyncio.sleep(1.0)
@@ -288,25 +264,7 @@ class TestAnnouncePolicyIntegration:
                 "All policy calls should have returned False"
             )
 
-            # Disconnect the peers
-            conn_task_a.cancel()
-            conn_task_b.cancel()
-
-            try:
-                await conn_task_a
-            except asyncio.CancelledError:
-                pass
-
-            try:
-                await conn_task_b
-            except asyncio.CancelledError:
-                pass
-
-            transport_a.close()
-            transport_b.close()
-
-            # Wait for cleanup
-            await asyncio.sleep(0.5)
+            await asyncio.gather(dialer.close(), listener.close())
 
             # Try to find the document - should NOT be available because it was not announced
             handle_b = await asyncio.wait_for(repo_b.find(handle_a.url), timeout=2.0)
@@ -315,11 +273,9 @@ class TestAnnouncePolicyIntegration:
             )
 
     @pytest.mark.asyncio
-    async def test_policy_called_with_allow_result(self):
+    async def test_policy_called_with_allow_result(self, memory_connection):
         """Test that allow policy allows document to be announced and synced."""
         import asyncio
-
-        from automerge.transports import InMemoryTransport
 
         # Track policy calls
         policy_calls = []
@@ -343,9 +299,7 @@ class TestAnnouncePolicyIntegration:
                 doc["message"] = "Test document"
 
             # Connect the repos
-            transport_a, transport_b = InMemoryTransport.create_pair()
-            conn_task_a = asyncio.create_task(repo_a.connect(transport_a))
-            conn_task_b = asyncio.create_task(repo_b.accept(transport_b))
+            dialer, listener = await memory_connection(repo_a, repo_b)
 
             # Wait for connection and policy check
             await asyncio.sleep(1.0)
@@ -363,25 +317,7 @@ class TestAnnouncePolicyIntegration:
                 "All policy calls should have returned True"
             )
 
-            # Disconnect the peers
-            conn_task_a.cancel()
-            conn_task_b.cancel()
-
-            try:
-                await conn_task_a
-            except asyncio.CancelledError:
-                pass
-
-            try:
-                await conn_task_b
-            except asyncio.CancelledError:
-                pass
-
-            transport_a.close()
-            transport_b.close()
-
-            # Wait for cleanup
-            await asyncio.sleep(0.5)
+            await asyncio.gather(dialer.close(), listener.close())
 
             # Try to find the document - should be available because it was announced
             handle_b = await asyncio.wait_for(repo_b.find(handle_a.url), timeout=2.0)

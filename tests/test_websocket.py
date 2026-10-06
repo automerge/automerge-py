@@ -14,11 +14,24 @@ import pytest
 if importlib.util.find_spec("websockets") is None:
     pytest.skip("websockets not installed", allow_module_level=True)
 
-from automerge.repo import InMemoryStorage, Repo
+from automerge.repo import Backoff, DialFailedError, InMemoryStorage, Repo
 from automerge.transports import (
     WebSocketClientTransport,
     WebSocketServer,
 )
+
+
+async def open_dialer(repo, port, *, extra_headers=None):
+    url = f"ws://localhost:{port}"
+    dialer = await repo.add_dialer(
+        url,
+        connect=lambda: WebSocketClientTransport.connect(
+            url, extra_headers=extra_headers
+        ),
+        backoff=Backoff(max_retries=0),
+    )
+    await asyncio.wait_for(dialer.wait_connected(), timeout=5)
+    return dialer
 
 
 @pytest.mark.asyncio
@@ -38,8 +51,7 @@ async def test_websocket_document_sync():
             await asyncio.sleep(0.1)
 
             # Connect repo_a as client
-            transport = await WebSocketClientTransport.connect("ws://localhost:8768")
-            _conn_task = asyncio.create_task(repo_a.connect(transport))
+            dialer = await open_dialer(repo_a, 8768)
 
             # Give time for handshake to complete
             await asyncio.sleep(0.5)
@@ -74,8 +86,8 @@ async def test_websocket_document_sync():
             count_b = doc_b["count"]
             assert count_a == count_b == 42
 
-            # Close connection
-            await transport.close()
+            # Close the connector, preventing retries.
+            await dialer.close()
             await asyncio.sleep(0.1)
 
 
@@ -94,8 +106,7 @@ async def test_websocket_bidirectional_sync():
             await asyncio.sleep(0.1)
 
             # Connect repo_a as client
-            transport = await WebSocketClientTransport.connect("ws://localhost:8769")
-            _conn_task = asyncio.create_task(repo_a.connect(transport))
+            dialer = await open_dialer(repo_a, 8769)
             await asyncio.sleep(0.5)
 
             # Create document in client (repo_a)
@@ -129,7 +140,7 @@ async def test_websocket_bidirectional_sync():
             source = doc_b1_on_a["source"]
             assert source == "server"
 
-            await transport.close()
+            await dialer.close()
             await asyncio.sleep(0.1)
 
 
@@ -150,11 +161,8 @@ async def test_websocket_multiple_clients():
             await asyncio.sleep(0.1)
 
             # Connect two clients
-            transport1 = await WebSocketClientTransport.connect("ws://localhost:8770")
-            transport2 = await WebSocketClientTransport.connect("ws://localhost:8770")
-
-            _conn_task1 = asyncio.create_task(repo_client1.connect(transport1))
-            _conn_task2 = asyncio.create_task(repo_client2.connect(transport2))
+            dialer1 = await open_dialer(repo_client1, 8770)
+            dialer2 = await open_dialer(repo_client2, 8770)
             await asyncio.sleep(0.5)
 
             # Create document in client1
@@ -177,8 +185,7 @@ async def test_websocket_multiple_clients():
             from_field = doc_on_client2["from"]
             assert from_field == "client1"
 
-            await transport1.close()
-            await transport2.close()
+            await asyncio.gather(dialer1.close(), dialer2.close())
             await asyncio.sleep(0.1)
 
 
@@ -195,8 +202,7 @@ async def test_websocket_document_changes_sync():
         async with WebSocketServer(repo_b, "localhost", 8771):
             await asyncio.sleep(0.1)
 
-            transport = await WebSocketClientTransport.connect("ws://localhost:8771")
-            _conn_task = asyncio.create_task(repo_a.connect(transport))
+            dialer = await open_dialer(repo_a, 8771)
             await asyncio.sleep(0.5)
 
             # Create document with initial content
@@ -222,7 +228,7 @@ async def test_websocket_document_changes_sync():
             counter_b = doc_b["counter"]
             assert counter_b == 3, "Counter should be 3 after three increments"
 
-            await transport.close()
+            await dialer.close()
             await asyncio.sleep(0.1)
 
 
@@ -233,16 +239,15 @@ async def test_websocket_connection_failure():
     repo = await Repo.load(storage)
 
     async with repo:
-        # Try to connect to non-existent server
-        try:
-            _transport = await asyncio.wait_for(
-                WebSocketClientTransport.connect("ws://localhost:9999"),
-                timeout=2.0,
-            )
-            assert False, "Should have failed to connect"
-        except (ConnectionRefusedError, OSError, asyncio.TimeoutError):
-            # Expected - connection should fail
-            pass
+        url = "ws://localhost:9999"
+        dialer = await repo.add_dialer(
+            url,
+            connect=lambda: WebSocketClientTransport.connect(url),
+            backoff=Backoff(max_retries=0),
+        )
+        with pytest.raises(DialFailedError) as failed:
+            await asyncio.wait_for(dialer.wait_connected(), timeout=2)
+        assert isinstance(failed.value.__cause__, OSError)
 
 
 @pytest.mark.asyncio
@@ -262,8 +267,8 @@ async def test_websocket_connection_lost_during_operation():
 
         try:
             # Connect client
-            transport = await WebSocketClientTransport.connect("ws://localhost:8772")
-            _conn_task = asyncio.create_task(repo_a.connect(transport))
+            dialer = await open_dialer(repo_a, 8772)
+            connection = dialer.connection
             await asyncio.sleep(0.5)
 
             # Create document
@@ -277,9 +282,9 @@ async def test_websocket_connection_lost_during_operation():
             await server.stop()
             await asyncio.sleep(0.3)
 
-            # Connection task should complete (with error reason)
-            # The repo should handle this gracefully
-            # Note: conn_task may already be done at this point
+            await asyncio.wait_for(connection.wait_closed(), timeout=2)
+            assert connection.closed
+            await dialer.close()
 
         finally:
             # Clean up
@@ -303,8 +308,8 @@ async def test_websocket_server_shutdown_with_clients():
         await asyncio.sleep(0.1)
 
         # Connect client
-        transport = await WebSocketClientTransport.connect("ws://localhost:8773")
-        _conn_task = asyncio.create_task(repo_client.connect(transport))
+        dialer = await open_dialer(repo_client, 8773)
+        connection = dialer.connection
         await asyncio.sleep(0.3)
 
         # Verify connection is established
@@ -318,6 +323,8 @@ async def test_websocket_server_shutdown_with_clients():
         # Server should have cleaned up
         assert server._server is None
         assert len(server._connections) == 0
+        await asyncio.wait_for(connection.wait_closed(), timeout=2)
+        await dialer.close()
 
 
 @pytest.mark.asyncio
@@ -360,11 +367,9 @@ async def test_websocket_connect_with_extra_headers():
             await asyncio.sleep(0.1)
 
             # Connect with extra headers
-            transport = await WebSocketClientTransport.connect(
-                "ws://localhost:8775",
-                extra_headers={"Authorization": "Bearer test-token"},
+            dialer = await open_dialer(
+                repo_a, 8775, extra_headers={"Authorization": "Bearer test-token"}
             )
-            _conn_task = asyncio.create_task(repo_a.connect(transport))
             await asyncio.sleep(0.5)
 
             # Create a document and verify sync works with extra headers
@@ -380,5 +385,5 @@ async def test_websocket_connect_with_extra_headers():
             doc_b = handle_b.doc()
             assert doc_b["auth"] == "yes"
 
-            await transport.close()
+            await dialer.close()
             await asyncio.sleep(0.1)

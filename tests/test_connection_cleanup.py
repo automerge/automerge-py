@@ -4,16 +4,15 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_connection_cleanup_with_deny_policy():
+async def test_connection_cleanup_with_deny_policy(memory_connection):
     """Test that connection cleanup works correctly with announce policy.
 
-    This test verifies that when connections are cancelled and closed,
+    This test verifies that when connectors are closed,
     the Hub is properly notified so it stops emitting SendActions for
     those connections.
     """
     import asyncio
     from automerge.repo import Repo, InMemoryStorage
-    from automerge.transports import InMemoryTransport
 
     # Add a deny-all policy to Repo A
     async def deny_all_policy(document_id: str, peer_id: str) -> bool:
@@ -32,35 +31,14 @@ async def test_connection_cleanup_with_deny_policy():
         with handle_a.change() as doc:
             doc["message"] = "Test document"
 
-        # Now create and connect transports
-        transport_a, transport_b = InMemoryTransport.create_pair()
-
-        conn_task_a = asyncio.create_task(repo_a.connect(transport_a))
-        conn_task_b = asyncio.create_task(repo_b.accept(transport_b))
+        dialer, listener = await memory_connection(repo_a, repo_b)
 
         # Wait for connection to establish and policy to be checked
         await asyncio.sleep(1.0)
 
-        # Cancel connection tasks
-        conn_task_a.cancel()
-        conn_task_b.cancel()
-
-        try:
-            await conn_task_a
-        except asyncio.CancelledError:
-            pass
-
-        try:
-            await conn_task_b
-        except asyncio.CancelledError:
-            pass
-
-        # Close transports
-        transport_a.close()
-        transport_b.close()
-
-        # Wait for cleanup
-        await asyncio.sleep(0.5)
+        await asyncio.gather(dialer.close(), listener.close())
+        assert not repo_a._connections and not repo_b._connections
+        assert not repo_a._dialers and not repo_b._listeners
 
         # Now call find() - this should NOT hang because the Hub was notified of disconnection
         handle_b = await asyncio.wait_for(repo_b.find(handle_a.url), timeout=2.0)

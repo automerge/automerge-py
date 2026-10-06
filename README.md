@@ -107,9 +107,12 @@ Text objects are collaborative sequences that automatically merge concurrent edi
      repo = await Repo.load(storage)
 
      async with repo:
-         # Connect to server
-         transport = await WebSocketClientTransport.connect("ws://localhost:8080")
-         await repo.connect(transport)
+         # The factory opens a fresh transport on every connection attempt.
+         url = "ws://localhost:8080"
+         dialer = await repo.add_dialer(
+             url, connect=lambda: WebSocketClientTransport.connect(url)
+         )
+         await dialer.wait_connected()
 
          # Create and modify documents - changes sync automatically!
          handle = await repo.create()
@@ -120,9 +123,15 @@ Text objects are collaborative sequences that automatically merge concurrent edi
          # Read document contents using direct access
          doc = handle.doc()
          print(f"Message: {doc['message']}")
+         await asyncio.sleep(3600)  # Keep syncing and reconnecting as needed.
  ```
  
  See the [examples/](examples/) directory for more complete examples and usage patterns.
+
+For automatic reconnection and explicit connection ownership, use
+`Repo.add_dialer()` and `Repo.add_listener()`. See the
+[dialer, listener, and connection API guide](docs/connectors.md) for transport
+factories, retry policies, identity checks, and lifecycle examples.
 
 ### Using S3 Storage
 

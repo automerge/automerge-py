@@ -1,7 +1,7 @@
 //! Hub event types
 //!
 //! This module contains types for events sent to the Hub,
-//! including PeerInfo, ConnDirection, and HubEvent.
+//! including PeerInfo and HubEvent.
 
 use pyo3::prelude::*;
 
@@ -48,37 +48,12 @@ impl From<samod_core::network::PeerInfo> for PyPeerInfo {
     }
 }
 
-/// Wrapper for samod_core::network::ConnDirection
-///
-/// Indicates whether a connection is outgoing or incoming.
-#[pyclass(name = "ConnDirection")]
-#[derive(Clone, Copy)]
-pub enum PyConnDirection {
-    /// Connection initiated by this peer
-    Outgoing,
-    /// Connection accepted from a remote peer
-    Incoming,
-}
-
-impl From<PyConnDirection> for samod_core::network::ConnDirection {
-    fn from(dir: PyConnDirection) -> Self {
-        match dir {
-            PyConnDirection::Outgoing => samod_core::network::ConnDirection::Outgoing,
-            PyConnDirection::Incoming => samod_core::network::ConnDirection::Incoming,
-        }
-    }
-}
-
 /// Wrapper for samod_core::actors::hub::HubEvent
 ///
 /// Represents an event that can be sent to the Hub for processing.
 #[derive(Clone)]
 pub(crate) enum HubEventKind {
     Core(samod_core::actors::hub::HubEvent),
-    CreateConnection {
-        command_id: samod_core::CommandId,
-        event: samod_core::actors::hub::HubEvent,
-    },
     FindDocument {
         command_id: samod_core::CommandId,
         document_id: samod_core::DocumentId,
@@ -165,16 +140,101 @@ impl PyHubEvent {
         PyDispatchedCommand::new(dispatched.command_id, dispatched.event)
     }
 
-    /// Create a command to create a new connection
-    ///
-    /// Args:
-    ///     direction: Whether this is an outgoing or incoming connection
-    ///
-    /// Returns:
-    ///     DispatchedCommand with command_id and event
+    /// Register a persistent outgoing connector. Durations are in seconds.
     #[staticmethod]
-    fn create_connection(direction: PyConnDirection) -> PyDispatchedCommand {
-        PyDispatchedCommand::create_connection(direction)
+    #[pyo3(signature = (url, initial_delay=0.1, max_delay=30.0, max_retries=None))]
+    fn add_dialer(
+        url: String,
+        initial_delay: f64,
+        max_delay: f64,
+        max_retries: Option<u32>,
+    ) -> PyResult<PyDispatchedCommand> {
+        use pyo3::exceptions::PyValueError;
+        use samod_core::network::{BackoffConfig, DialerConfig};
+        use std::time::Duration;
+
+        let initial_delay = Duration::try_from_secs_f64(initial_delay)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let max_delay = Duration::try_from_secs_f64(max_delay)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        if max_delay < initial_delay {
+            return Err(PyValueError::new_err("max_delay must be >= initial_delay"));
+        }
+        let config = DialerConfig {
+            url: url
+                .parse()
+                .map_err(|e| PyValueError::new_err(format!("{e}")))?,
+            backoff: BackoffConfig {
+                initial_delay,
+                max_delay,
+                max_retries,
+            },
+        };
+        let command = samod_core::actors::hub::HubEvent::add_dialer(config);
+        Ok(PyDispatchedCommand::new(command.command_id, command.event))
+    }
+
+    #[staticmethod]
+    fn add_listener(url: String) -> PyResult<PyDispatchedCommand> {
+        let config = samod_core::network::ListenerConfig {
+            url: url
+                .parse()
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e}")))?,
+        };
+        let command = samod_core::actors::hub::HubEvent::add_listener(config);
+        Ok(PyDispatchedCommand::new(command.command_id, command.event))
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (dialer_id, expected_peer_id=None))]
+    fn create_dialer_connection(
+        dialer_id: u32,
+        expected_peer_id: Option<PyPeerId>,
+    ) -> PyDispatchedCommand {
+        let command = samod_core::actors::hub::HubEvent::create_dialer_connection(
+            dialer_id.into(),
+            expected_peer_id.map(|id| id.0),
+        );
+        PyDispatchedCommand::new(command.command_id, command.event)
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (listener_id, expected_peer_id=None))]
+    fn create_listener_connection(
+        listener_id: u32,
+        expected_peer_id: Option<PyPeerId>,
+    ) -> PyDispatchedCommand {
+        let command = samod_core::actors::hub::HubEvent::create_listener_connection(
+            listener_id.into(),
+            expected_peer_id.map(|id| id.0),
+        );
+        PyDispatchedCommand::new(command.command_id, command.event)
+    }
+
+    #[staticmethod]
+    fn dial_failed(dialer_id: u32, error: String, permanent: bool) -> Self {
+        Self {
+            inner: samod_core::actors::hub::HubEvent::dial_failed(
+                dialer_id.into(),
+                error,
+                permanent,
+            )
+            .into(),
+        }
+    }
+
+    #[staticmethod]
+    fn remove_dialer(dialer_id: u32) -> Self {
+        Self {
+            inner: samod_core::actors::hub::HubEvent::remove_dialer(dialer_id.into()).into(),
+        }
+    }
+
+    #[staticmethod]
+    fn remove_listener(listener_id: u32) -> Self {
+        Self {
+            inner: samod_core::actors::hub::HubEvent::remove_listener(listener_id.into()).into(),
+        }
     }
 
     /// Create a command to create a new document
