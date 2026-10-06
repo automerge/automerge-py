@@ -6,7 +6,6 @@ from .. import _automerge
 # from .._automerge import *
 from .._automerge import (
     ROOT,
-    Change,
     Document,
     ExpandMark,
     Message,
@@ -17,7 +16,6 @@ from .._automerge import (
 
 __all__ = [
     "ROOT",
-    "Change",
     "Document",
     "ExpandMark",
     "Message",

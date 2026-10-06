@@ -620,7 +620,7 @@ impl Document {
         })
     }
 
-    fn apply_changes(&mut self, changes: Vec<PyRef<'_, PyChange>>) -> PyResult<()> {
+    fn load_incremental(&mut self, data: &[u8]) -> PyResult<usize> {
         let mut inner = self
             .inner
             .write()
@@ -628,16 +628,12 @@ impl Document {
 
         if inner.tx.is_some() {
             return Err(PyException::new_err(
-                "cannot apply changes with an active transaction",
+                "cannot load incremental data with an active transaction",
             ));
         }
 
         let doc = inner.doc_mut()?;
-        let changes = changes
-            .iter()
-            .map(|change| change.0.clone())
-            .collect::<Vec<_>>();
-        doc.apply_changes(changes)
+        doc.load_incremental(data)
             .map_err(|e| PyException::new_err(e.to_string()))
     }
 
@@ -1350,13 +1346,6 @@ struct PyChange(am::Change);
 
 #[pymethods]
 impl PyChange {
-    #[staticmethod]
-    fn from_bytes(bytes: &[u8]) -> PyResult<Self> {
-        am::Change::from_bytes(bytes.to_vec())
-            .map(PyChange)
-            .map_err(|e| PyException::new_err(e.to_string()))
-    }
-
     fn __repr__(&self) -> String {
         format!("{:?}", self.0)
     }

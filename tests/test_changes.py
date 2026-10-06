@@ -2,7 +2,7 @@ import base64
 from datetime import datetime
 from typing import List, Optional, Tuple
 
-from automerge.core import Change, ROOT, Document, ObjType, ScalarType, extract
+from automerge.core import ROOT, Document, ObjType, ScalarType, extract
 
 
 JS_CHANGE_B64 = (
@@ -13,9 +13,7 @@ JS_CHANGE_B64 = (
 
 def test_apply_javascript_change() -> None:
     doc = Document()
-    change = Change.from_bytes(base64.b64decode(JS_CHANGE_B64))
-
-    doc.apply_changes([change])
+    doc.load_incremental(base64.b64decode(JS_CHANGE_B64))
 
     assert extract(doc) == {
         "count": 42,
@@ -24,7 +22,7 @@ def test_apply_javascript_change() -> None:
     }
 
 
-def test_change_from_bytes_and_missing_dependencies() -> None:
+def test_incremental_changes_and_missing_dependencies() -> None:
     source = Document(actor_id=b"source")
     with source.transaction() as tx:
         tx.put(ROOT, "first", ScalarType.Str, "one")
@@ -37,11 +35,38 @@ def test_change_from_bytes_and_missing_dependencies() -> None:
     assert second is not None
 
     target = Document(actor_id=b"target")
-    target.apply_changes([Change.from_bytes(second.raw_bytes)])
+    target.load_incremental(second.raw_bytes)
     assert target.get_missing_deps([]) == [first.hash]
 
-    target.apply_changes([Change.from_bytes(first.raw_bytes)])
+    target.load_incremental(first.raw_bytes)
     assert target.get_missing_deps([]) == []
+    assert extract(target) == {"first": "one", "second": "two"}
+
+
+def test_incremental_saved_document() -> None:
+    source = Document(actor_id=b"source")
+    with source.transaction() as tx:
+        tx.put(ROOT, "first", ScalarType.Str, "one")
+
+    target = Document(actor_id=b"target")
+    assert target.load_incremental(source.save()) > 0
+    assert extract(target) == {"first": "one"}
+
+
+def test_incremental_change_bundle() -> None:
+    source = Document(actor_id=b"source")
+    with source.transaction() as tx:
+        tx.put(ROOT, "first", ScalarType.Str, "one")
+    first = source.get_last_local_change()
+    assert first is not None
+
+    with source.transaction() as tx:
+        tx.put(ROOT, "second", ScalarType.Str, "two")
+    second = source.get_last_local_change()
+    assert second is not None
+
+    target = Document(actor_id=b"target")
+    assert target.load_incremental(first.raw_bytes + second.raw_bytes) > 0
     assert extract(target) == {"first": "one", "second": "two"}
 
 
