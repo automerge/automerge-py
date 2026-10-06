@@ -2,6 +2,7 @@
 name = "automerge"
 version = "1.0.0-rc1"
 edition = "2021"
+rust-version = "1.90"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
@@ -10,10 +11,10 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = "0.27.2"
-automerge = "0.7.2"
+automerge = "0.12.0"
 hex = "^0.4.3"
 thiserror = "^1.0.16"
-samod-core = { version = "0.7.1"}
+samod-core = { version = "0.15.0"}
 rand = "0.9"
 serde_json = "1.0"
 tracing = "0.1"

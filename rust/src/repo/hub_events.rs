@@ -72,10 +72,30 @@ impl From<PyConnDirection> for samod_core::network::ConnDirection {
 /// Wrapper for samod_core::actors::hub::HubEvent
 ///
 /// Represents an event that can be sent to the Hub for processing.
+#[derive(Clone)]
+pub(crate) enum HubEventKind {
+    Core(samod_core::actors::hub::HubEvent),
+    CreateConnection {
+        command_id: samod_core::CommandId,
+        event: samod_core::actors::hub::HubEvent,
+    },
+    FindDocument {
+        command_id: samod_core::CommandId,
+        document_id: samod_core::DocumentId,
+        event: samod_core::actors::hub::HubEvent,
+    },
+}
+
+impl From<samod_core::actors::hub::HubEvent> for HubEventKind {
+    fn from(event: samod_core::actors::hub::HubEvent) -> Self {
+        Self::Core(event)
+    }
+}
+
 #[pyclass(name = "HubEvent")]
 #[derive(Clone)]
 pub struct PyHubEvent {
-    pub(crate) inner: samod_core::actors::hub::HubEvent,
+    pub(crate) inner: HubEventKind,
 }
 
 #[pymethods]
@@ -87,7 +107,7 @@ impl PyHubEvent {
     #[staticmethod]
     fn io_complete(io_result: PyIoResult) -> Self {
         PyHubEvent {
-            inner: samod_core::actors::hub::HubEvent::io_complete(io_result.to_core()),
+            inner: samod_core::actors::hub::HubEvent::io_complete(io_result.to_core()).into(),
         }
     }
 
@@ -95,7 +115,7 @@ impl PyHubEvent {
     #[staticmethod]
     fn tick() -> Self {
         PyHubEvent {
-            inner: samod_core::actors::hub::HubEvent::tick(),
+            inner: samod_core::actors::hub::HubEvent::tick().into(),
         }
     }
 
@@ -106,7 +126,7 @@ impl PyHubEvent {
     #[staticmethod]
     fn connection_lost(connection_id: PyConnectionId) -> Self {
         PyHubEvent {
-            inner: samod_core::actors::hub::HubEvent::connection_lost(connection_id.0),
+            inner: samod_core::actors::hub::HubEvent::connection_lost(connection_id.0).into(),
         }
     }
 
@@ -114,7 +134,7 @@ impl PyHubEvent {
     #[staticmethod]
     fn stop() -> Self {
         PyHubEvent {
-            inner: samod_core::actors::hub::HubEvent::stop(),
+            inner: samod_core::actors::hub::HubEvent::stop().into(),
         }
     }
 
@@ -126,7 +146,8 @@ impl PyHubEvent {
     #[staticmethod]
     fn actor_message(actor_id: PyDocumentActorId, message: PyDocToHubMsg) -> Self {
         PyHubEvent {
-            inner: samod_core::actors::hub::HubEvent::actor_message(actor_id.0, message.inner),
+            inner: samod_core::actors::hub::HubEvent::actor_message(actor_id.0, message.inner)
+                .into(),
         }
     }
 
@@ -153,8 +174,7 @@ impl PyHubEvent {
     ///     DispatchedCommand with command_id and event
     #[staticmethod]
     fn create_connection(direction: PyConnDirection) -> PyDispatchedCommand {
-        let dispatched = samod_core::actors::hub::HubEvent::create_connection(direction.into());
-        PyDispatchedCommand::new(dispatched.command_id, dispatched.event)
+        PyDispatchedCommand::create_connection(direction)
     }
 
     /// Create a command to create a new document
@@ -177,8 +197,7 @@ impl PyHubEvent {
     ///     DispatchedCommand with command_id and event
     #[staticmethod]
     fn find_document(document_id: PyDocumentId) -> PyDispatchedCommand {
-        let dispatched = samod_core::actors::hub::HubEvent::find_document(document_id.0);
-        PyDispatchedCommand::new(dispatched.command_id, dispatched.event)
+        PyDispatchedCommand::find_document(document_id.0)
     }
 
     /// Create a command indicating that a document actor is ready
@@ -196,12 +215,5 @@ impl PyHubEvent {
 
     fn __repr__(&self) -> String {
         format!("HubEvent(...)")
-    }
-}
-
-impl PyHubEvent {
-    /// Convert to Rust HubEvent
-    pub(crate) fn to_rust_event(&self) -> samod_core::actors::hub::HubEvent {
-        self.inner.clone()
     }
 }

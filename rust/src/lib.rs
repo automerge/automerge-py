@@ -1380,7 +1380,7 @@ impl PyChange {
 
     #[getter]
     fn message(&self) -> Option<String> {
-        self.0.message().cloned()
+        self.0.message().map(str::to_owned)
     }
 
     #[getter]
