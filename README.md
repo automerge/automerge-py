@@ -57,7 +57,9 @@ doc = Document()
 # Use Python dict/list syntax
 with doc.change() as d:
     d["title"] = "My Document"  # Creates collaborative Text by default
-    d["version"] = ImmutableString("1.0.0")  # Use ImmutableString for non-editable strings
+    d["version"] = ImmutableString(
+        "1.0.0"
+    )  # Use ImmutableString for non-editable strings
     d["tags"] = []
     d["tags"][0] = "python"
     d["tags"][1] = "automerge"
@@ -86,33 +88,35 @@ Text objects are collaborative sequences that automatically merge concurrent edi
  from automerge.repo import Repo, InMemoryStorage
  from automerge.transports import WebSocketServer, WebSocketClientTransport
  from automerge import ROOT, ScalarType
- 
+
+
  # Server side
  async def run_server():
      storage = InMemoryStorage()
      repo = await Repo.load(storage)
- 
+
      async with repo:
          async with WebSocketServer(repo, "localhost", 8080):
              print("Server running on ws://localhost:8080")
              await asyncio.sleep(3600)  # Keep running
- 
+
+
  # Client side
  async def run_client():
      storage = InMemoryStorage()
      repo = await Repo.load(storage)
- 
+
      async with repo:
          # Connect to server
          transport = await WebSocketClientTransport.connect("ws://localhost:8080")
          await repo.connect(transport)
- 
+
          # Create and modify documents - changes sync automatically!
          handle = await repo.create()
-         
+
          with handle.change() as doc:
-            doc["message"] = "Hello, Automerge!"
- 
+             doc["message"] = "Hello, Automerge!"
+
          # Read document contents using direct access
          doc = handle.doc()
          print(f"Message: {doc['message']}")
@@ -132,7 +136,7 @@ from automerge.repo import Repo
 storage = S3Storage(
     bucket="my-bucket",
     region="us-east-1",
-    prefix="users/user-123"  # Optional: isolate data by user/tenant
+    prefix="users/user-123",  # Optional: isolate data by user/tenant
 )
 
 # Use exactly like any other storage
