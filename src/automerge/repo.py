@@ -1454,6 +1454,20 @@ class DocHandle:
         """
         return self._document_id
 
+    def _get_core_doc(self):
+        """Get the underlying core Document from the document actor.
+
+        Returns:
+            The Rust-backed core Document for this handle.
+
+        Raises:
+            ValueError: If the document actor has been removed from the repo.
+        """
+        actor = self._repo._doc_actors.get(self._actor_id)
+        if actor is None:
+            raise ValueError(f"Document actor {self._actor_id} not found")
+        return actor.get_document()
+
     def doc(self):
         """Return a read-only view of the document.
 
@@ -1476,16 +1490,36 @@ class DocHandle:
 
         from .document import MapReadProxy
 
-        # Get the document actor
-        actor = self._repo._doc_actors.get(self._actor_id)
-        if actor is None:
-            raise ValueError(f"Document actor {self._actor_id} not found")
+        return MapReadProxy(self._get_core_doc(), core.ROOT, None)
 
-        # Get the actor-backed document
-        core_doc = actor.get_document()
+    def heads(self) -> list[bytes]:
+        """Return the current heads of the document.
 
-        # Wrap in MapReadProxy for Pythonic dict-like access
-        return MapReadProxy(core_doc, core.ROOT, None)
+        Heads identify the current state of the document as a list of
+        change hashes. They can be saved and later passed to view() to
+        get a read-only snapshot of the document at that point in time.
+
+        Returns:
+            The current heads as a list of raw change hashes.
+        """
+        return self._get_core_doc().get_heads()
+
+    def view(self, heads: list[bytes]):
+        """Return a read-only view of the document at specific heads.
+
+        Args:
+            heads: A list of change hashes identifying the document
+                state to view, as returned by heads().
+
+        Returns:
+            MapReadProxy: A dict-like read-only view of the document
+            at the requested heads.
+        """
+        import automerge.core as core
+
+        from .document import MapReadProxy
+
+        return MapReadProxy(self._get_core_doc(), core.ROOT, heads)
 
     def change(self) -> ChangeContext:
         """Return a context manager for modifying the document.

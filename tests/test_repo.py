@@ -1954,6 +1954,105 @@ async def test_context_cleanup_on_error():
 
 
 @pytest.mark.asyncio
+async def test_doc_handle_heads():
+    """Test that heads() returns change hashes tracking document state."""
+    storage = InMemoryStorage()
+    repo = await Repo.load(storage)
+
+    async with repo:
+        handle = await repo.create()
+
+        # Empty document should still return a valid heads list
+        heads_empty = handle.heads()
+        assert isinstance(heads_empty, list)
+
+        # Make a change and let IO tasks settle
+        with handle.change() as doc:
+            doc["key"] = "value1"
+        await asyncio.sleep(0.1)
+
+        # Heads should now contain exactly one change hash (single linear history)
+        heads_after_first = handle.heads()
+        assert len(heads_after_first) == 1
+        assert isinstance(heads_after_first[0], bytes)
+        assert heads_after_first != heads_empty
+
+        # Make a second change
+        with handle.change() as doc:
+            doc["key"] = "value2"
+        await asyncio.sleep(0.1)
+
+        # Heads should have advanced to a new hash
+        heads_after_second = handle.heads()
+        assert len(heads_after_second) == 1
+        assert heads_after_second != heads_after_first
+
+
+@pytest.mark.asyncio
+async def test_doc_handle_view_at_heads():
+    """Test that view(heads) returns a snapshot at the requested state."""
+    storage = InMemoryStorage()
+    repo = await Repo.load(storage)
+
+    async with repo:
+        handle = await repo.create()
+
+        # Set counter to 1 and capture heads
+        with handle.change() as doc:
+            doc["counter"] = 1
+        await asyncio.sleep(0.1)
+
+        heads_v1 = handle.heads()
+
+        # Update counter to 2 and capture new heads
+        with handle.change() as doc:
+            doc["counter"] = 2
+        await asyncio.sleep(0.1)
+
+        heads_v2 = handle.heads()
+
+        # Viewing at v1 heads should return the old value
+        snapshot_v1 = handle.view(heads_v1)
+        assert snapshot_v1["counter"] == 1
+
+        # Viewing at v2 heads should return the updated value
+        snapshot_v2 = handle.view(heads_v2)
+        assert snapshot_v2["counter"] == 2
+
+        # doc() without heads should match the latest state
+        current = handle.doc()
+        assert current["counter"] == 2
+
+
+@pytest.mark.asyncio
+async def test_doc_handle_view_preserves_nested():
+    """Test that view(heads) works with nested document structures."""
+    storage = InMemoryStorage()
+    repo = await Repo.load(storage)
+
+    async with repo:
+        handle = await repo.create()
+
+        # Create a nested map and capture heads
+        with handle.change() as doc:
+            doc["config"] = {"version": 1}
+        await asyncio.sleep(0.1)
+
+        heads_v1 = handle.heads()
+
+        # Mutate the nested map: update an existing key and add a new one
+        with handle.change() as doc:
+            doc["config"]["version"] = 2
+            doc["config"]["extra"] = "added"
+        await asyncio.sleep(0.1)
+
+        # Snapshot at v1 should see the original nested state
+        snapshot = handle.view(heads_v1)
+        assert snapshot["config"]["version"] == 1
+        assert "extra" not in list(snapshot["config"].keys())
+
+
+@pytest.mark.asyncio
 async def test_context_cleanup_after_success():
     """Test that context is cleaned up after successful change block."""
     from automerge.repo import InMemoryStorage
