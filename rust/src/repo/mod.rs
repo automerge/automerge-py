@@ -10,11 +10,11 @@ pub mod commands;
 pub mod connection;
 pub mod document;
 pub mod hub;
-mod hub_compat;
 pub mod hub_events;
 pub mod hub_results;
 pub mod io;
 pub mod loader;
+pub mod search;
 pub mod storage;
 pub mod types;
 
@@ -27,6 +27,7 @@ pub use hub_events::*;
 pub use hub_results::*;
 pub use io::*;
 pub use loader::*;
+pub use search::*;
 pub use storage::*;
 pub use types::*;
 
@@ -86,7 +87,10 @@ pub fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyCommandResultReceive>()?;
     m.add_class::<PyCommandResultActorReady>()?;
     m.add_class::<PyCommandResultCreateDocument>()?;
-    m.add_class::<PyCommandResultFindDocument>()?;
+    m.add_class::<PyCommandResultSearchForDoc>()?;
+    m.add_class::<PyDocSearch>()?;
+    m.add_class::<PyDocSearchPhase>()?;
+    m.add_class::<PyPeerRequestState>()?;
 
     // Hub events
     m.add_class::<PyPeerInfo>()?;

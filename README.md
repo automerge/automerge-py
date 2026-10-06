@@ -133,6 +133,10 @@ For automatic reconnection and explicit connection ownership, use
 [dialer, listener, and connection API guide](docs/connectors.md) for transport
 factories, retry policies, identity checks, and lifecycle examples.
 
+`Repo.find()` waits until a document is ready or currently unavailable. To
+inspect search progress or keep watching for later availability, use
+`Repo.search_for_doc()`. See the [document-search guide](docs/search.md).
+
 ### Using S3 Storage
 
 The `automerge.storages.s3` module provides S3-backed storage for persisting documents:

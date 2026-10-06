@@ -5,7 +5,6 @@
 
 use pyo3::prelude::*;
 
-use super::hub_compat::CompatHub;
 use super::hub_events::PyHubEvent;
 use super::hub_results::PyHubResults;
 use super::types::{PyPeerId, PyStorageId};
@@ -16,7 +15,7 @@ use super::types::{PyPeerId, PyStorageId};
 /// document actors, connections, and storage operations.
 #[pyclass(name = "Hub")]
 pub struct PyHub {
-    pub(crate) inner: std::sync::Arc<std::sync::Mutex<CompatHub>>,
+    pub(crate) inner: std::sync::Arc<std::sync::Mutex<samod_core::actors::hub::Hub>>,
 }
 
 #[pymethods]
@@ -77,9 +76,7 @@ impl PyHub {
         let mut rng = rand::rng();
         let timestamp = samod_core::UnixTimestamp::from_millis((now * 1000.0) as u128);
 
-        let results = guard
-            .handle_event(&mut rng, timestamp, &event.inner)
-            .map_err(pyo3::exceptions::PyRuntimeError::new_err)?;
+        let results = guard.handle_event(&mut rng, timestamp, event.inner.clone());
 
         PyHubResults::from_rust(py, results)
     }

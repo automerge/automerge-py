@@ -9,7 +9,8 @@ use super::commands::{command_result_to_py, PyCommandId};
 use super::document::{PyHubToDocMsg, PySpawnArgs};
 use super::hub_events::PyPeerInfo;
 use super::io::PyIoTask;
-use super::types::{PyConnectionId, PyDocumentActorId};
+use super::search::PyDocSearch;
+use super::types::{PyConnectionId, PyDocumentActorId, PyDocumentId};
 
 // ===== Connection Event =====
 
@@ -242,6 +243,16 @@ impl PyHubResults {
                     (*dialer_id).into()
                 }
             })
+            .collect()
+    }
+
+    /// Native document-search updates, including searches that remain unavailable.
+    #[getter]
+    fn search_state_updates(&self) -> Vec<(PyDocumentId, PyDocSearch)> {
+        self.inner
+            .search_state_updates
+            .iter()
+            .map(|(id, state)| (PyDocumentId(id.clone()), PyDocSearch(state.clone())))
             .collect()
     }
 

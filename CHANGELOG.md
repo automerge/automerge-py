@@ -29,8 +29,6 @@
 
 ### Fixed
 
-- Document lookups wait for storage loading or peer synchronization to finish,
-  and return `None` when the document is currently unavailable.
 - Boolean values assigned through the high-level API now round-trip as
   `True`/`False` instead of integers.
 - Updated Intel macOS wheel builds to use the `macos-15-intel` runner, and aligned

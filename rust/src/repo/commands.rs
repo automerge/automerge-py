@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 
-use super::hub_events::{HubEventKind, PyHubEvent};
+use super::hub_events::PyHubEvent;
+use super::search::PyDocSearch;
 use super::types::{PyConnectionId, PyDocumentActorId, PyDocumentId};
 
 /// Wrapper for samod_core::CommandId
@@ -50,7 +51,7 @@ impl PyCommandId {
 #[pyclass(name = "DispatchedCommand")]
 pub struct PyDispatchedCommand {
     command_id: samod_core::actors::hub::CommandId,
-    event: HubEventKind,
+    event: samod_core::actors::hub::HubEvent,
 }
 
 #[pymethods]
@@ -79,22 +80,7 @@ impl PyDispatchedCommand {
         command_id: samod_core::actors::hub::CommandId,
         event: samod_core::actors::hub::HubEvent,
     ) -> Self {
-        PyDispatchedCommand {
-            command_id,
-            event: event.into(),
-        }
-    }
-
-    pub(crate) fn find_document(document_id: samod_core::DocumentId) -> Self {
-        let command = samod_core::actors::hub::HubEvent::search_for_doc(document_id.clone());
-        Self {
-            command_id: command.command_id,
-            event: HubEventKind::FindDocument {
-                command_id: command.command_id,
-                document_id,
-                event: command.event,
-            },
-        }
+        PyDispatchedCommand { command_id, event }
     }
 }
 
@@ -213,29 +199,14 @@ impl PyCommandResultCreateDocument {
     }
 }
 
-/// FindDocument command result - document was found (or not)
-#[pyclass(name = "CommandResultFindDocument")]
+/// Native search result: actor ID and the initial search-state snapshot.
+#[pyclass(name = "CommandResultSearchForDoc")]
 #[derive(Clone)]
-pub struct PyCommandResultFindDocument {
+pub struct PyCommandResultSearchForDoc {
     #[pyo3(get)]
     actor_id: PyDocumentActorId,
     #[pyo3(get)]
-    found: bool,
-}
-
-#[pymethods]
-impl PyCommandResultFindDocument {
-    #[new]
-    fn new(actor_id: PyDocumentActorId, found: bool) -> Self {
-        PyCommandResultFindDocument { actor_id, found }
-    }
-
-    fn __repr__(&self) -> String {
-        format!(
-            "CommandResultFindDocument(actor_id={}, found={})",
-            self.actor_id.0, self.found
-        )
-    }
+    search_state: PyDocSearch,
 }
 
 // Helper function to convert Rust CommandResult to appropriate Python subclass
@@ -284,9 +255,9 @@ pub(crate) fn command_result_to_py(
             search_state,
         } => Py::new(
             py,
-            PyCommandResultFindDocument {
+            PyCommandResultSearchForDoc {
                 actor_id: PyDocumentActorId(*actor_id),
-                found: matches!(search_state.phase(), samod_core::DocSearchPhase::Ready),
+                search_state: PyDocSearch(search_state.clone()),
             },
         )
         .map(|obj| obj.into()),
