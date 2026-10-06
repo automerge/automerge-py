@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 
-use super::hub_events::PyHubEvent;
+use super::hub_events::{HubEventKind, PyConnDirection, PyHubEvent};
 use super::types::{PyConnectionId, PyDocumentActorId, PyDocumentId};
 
 /// Wrapper for samod_core::CommandId
@@ -50,7 +50,7 @@ impl PyCommandId {
 #[pyclass(name = "DispatchedCommand")]
 pub struct PyDispatchedCommand {
     command_id: samod_core::actors::hub::CommandId,
-    event: samod_core::actors::hub::HubEvent,
+    event: HubEventKind,
 }
 
 #[pymethods]
@@ -79,7 +79,47 @@ impl PyDispatchedCommand {
         command_id: samod_core::actors::hub::CommandId,
         event: samod_core::actors::hub::HubEvent,
     ) -> Self {
-        PyDispatchedCommand { command_id, event }
+        PyDispatchedCommand {
+            command_id,
+            event: event.into(),
+        }
+    }
+
+    pub(crate) fn create_connection(direction: PyConnDirection) -> Self {
+        use samod_core::actors::hub::HubEvent;
+        use samod_core::network::{BackoffConfig, DialerConfig, ListenerConfig};
+
+        // Diagnostic only: Python supplies an already-established transport.
+        let url = "automerge-py://transport".parse().unwrap();
+        let registration = match direction {
+            PyConnDirection::Outgoing => HubEvent::add_dialer(DialerConfig {
+                url,
+                backoff: BackoffConfig {
+                    max_retries: Some(0),
+                    ..Default::default()
+                },
+            }),
+            PyConnDirection::Incoming => HubEvent::add_listener(ListenerConfig { url }),
+        };
+        Self {
+            command_id: registration.command_id,
+            event: HubEventKind::CreateConnection {
+                command_id: registration.command_id,
+                event: registration.event,
+            },
+        }
+    }
+
+    pub(crate) fn find_document(document_id: samod_core::DocumentId) -> Self {
+        let command = samod_core::actors::hub::HubEvent::search_for_doc(document_id.clone());
+        Self {
+            command_id: command.command_id,
+            event: HubEventKind::FindDocument {
+                command_id: command.command_id,
+                document_id,
+                event: command.event,
+            },
+        }
     }
 }
 
@@ -264,13 +304,20 @@ pub(crate) fn command_result_to_py(
             },
         )
         .map(|obj| obj.into()),
-        samod_core::actors::hub::CommandResult::FindDocument { actor_id, found } => Py::new(
+        samod_core::actors::hub::CommandResult::SearchForDoc {
+            actor_id,
+            search_state,
+        } => Py::new(
             py,
             PyCommandResultFindDocument {
                 actor_id: PyDocumentActorId(*actor_id),
-                found: *found,
+                found: matches!(search_state.phase(), samod_core::DocSearchPhase::Ready),
             },
         )
         .map(|obj| obj.into()),
+        samod_core::actors::hub::CommandResult::AddDialer { .. }
+        | samod_core::actors::hub::CommandResult::AddListener { .. } => Err(
+            pyo3::exceptions::PyRuntimeError::new_err("Unexpected internal connector command"),
+        ),
     }
 }

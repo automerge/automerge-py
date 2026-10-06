@@ -10,6 +10,7 @@ pub mod commands;
 pub mod connection;
 pub mod document;
 pub mod hub;
+mod hub_compat;
 pub mod hub_events;
 pub mod hub_results;
 pub mod io;

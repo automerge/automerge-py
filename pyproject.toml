@@ -30,6 +30,11 @@ all = [
 [tool.maturin]
 features = ["pyo3/extension-module", "pyo3/abi3-py310"]
 module-name = "automerge._automerge"
+include = [
+    { path = "README.md", format = "sdist" },
+    { path = "CHANGELOG.md", format = "sdist" },
+    { path = "LICENSE", format = "sdist" },
+]
 
 [tool.pytest.ini_options]
 

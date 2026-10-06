@@ -107,6 +107,7 @@ pub(crate) fn connection_event_to_py(
         samod_core::network::ConnectionEvent::HandshakeCompleted {
             connection_id,
             peer_info,
+            ..
         } => Py::new(
             py,
             PyConnectionEventHandshakeCompleted {
@@ -120,6 +121,7 @@ pub(crate) fn connection_event_to_py(
         samod_core::network::ConnectionEvent::ConnectionFailed {
             connection_id,
             error,
+            ..
         } => Py::new(
             py,
             PyConnectionEventConnectionFailed {
@@ -131,6 +133,7 @@ pub(crate) fn connection_event_to_py(
         samod_core::network::ConnectionEvent::StateChanged {
             connection_id,
             new_state,
+            ..
         } => {
             Py::new(
                 py,
