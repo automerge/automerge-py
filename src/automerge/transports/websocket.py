@@ -7,14 +7,20 @@ Installation:
     pip install automerge[websocket]
 
 Usage:
-    # Client side
-    transport = await WebSocketClientTransport.connect("ws://localhost:8080")
-    await repo.connect(transport)
+    # Client side: the factory opens a fresh transport on each attempt.
+    url = "ws://localhost:8080"
+    dialer = await repo.add_dialer(
+        url, connect=lambda: WebSocketClientTransport.connect(url)
+    )
+    await dialer.wait_connected()
 
-    # Server side
+    # Server side: register one listener before accepting connections.
+    listener = await repo.add_listener("ws://localhost:8080")
+
     async def handle_connection(websocket, path):
-        transport = WebSocketServerTransport(websocket)
-        await repo.accept(transport)
+        connection = await listener.accept(WebSocketServerTransport(websocket))
+        async with connection:
+            await connection.wait_closed()
 
     # Or use the WebSocketServer helper
     async with WebSocketServer(repo, "localhost", 8080):
@@ -33,18 +39,19 @@ except ImportError as e:
         "Install it with: pip install automerge[websocket]"
     ) from e
 
-import asyncio
-
 
 class WebSocketClientTransport:
     """Client-side WebSocket transport.
 
     This transport wraps a WebSocket client connection for use with automerge-repo.
-    Use the connect() classmethod to establish a connection.
+    Use the connect() classmethod inside a dialer's transport factory.
 
     Example:
-        >>> transport = await WebSocketClientTransport.connect("ws://localhost:8080")
-        >>> await repo.connect(transport)
+        >>> url = "ws://localhost:8080"
+        >>> dialer = await repo.add_dialer(
+        ...     url, connect=lambda: WebSocketClientTransport.connect(url)
+        ... )
+        >>> await dialer.wait_connected()
     """
 
     def __init__(self, websocket: WebSocketClientProtocol):
@@ -73,9 +80,9 @@ class WebSocketClientTransport:
         Returns:
             A connected WebSocketClientTransport instance
 
-        Example:
-            >>> transport = await WebSocketClientTransport.connect("ws://localhost:8080")
-            >>> await repo.connect(transport)
+        Example (within a dialer's factory):
+            >>> async def connect_transport():
+            ...     return await WebSocketClientTransport.connect("ws://localhost:8080")
         """
         websocket = await connect(uri, extra_headers=extra_headers)
         return cls(websocket)
@@ -143,10 +150,11 @@ class WebSocketServerTransport:
     This transport wraps a WebSocket server connection for use with automerge-repo.
     Typically used within a WebSocket server handler function.
 
-    Example:
+    Example (using a listener registered for the server):
         >>> async def handle_connection(websocket, path):
-        ...     transport = WebSocketServerTransport(websocket)
-        ...     await repo.accept(transport)
+        ...     connection = await listener.accept(WebSocketServerTransport(websocket))
+        ...     async with connection:
+        ...         await connection.wait_closed()
     """
 
     def __init__(self, websocket: WebSocketServerProtocol):
@@ -244,7 +252,8 @@ class WebSocketServer:
         self._host = host
         self._port = port
         self._server = None
-        self._connections: set[asyncio.Task] = set()
+        self._listener = None
+        self._connections: set = set()
 
     async def _handle_connection(self, websocket, path):
         """Handle a WebSocket connection.
@@ -256,16 +265,17 @@ class WebSocketServer:
         # Create transport and accept connection
         transport = WebSocketServerTransport(websocket)
 
-        # Create task for this connection
-        task = asyncio.create_task(self._repo.accept(transport))
-        self._connections.add(task)
-
+        listener = self._listener
+        if listener is None or listener.closed:
+            await transport.close()
+            return
+        connection = await listener.accept(transport)
+        self._connections.add(connection)
         try:
-            # Wait for connection to finish
-            await task
+            await connection.wait_closed()
         finally:
-            # Clean up
-            self._connections.discard(task)
+            await connection.close()
+            self._connections.discard(connection)
 
     async def start(self):
         """Start the WebSocket server.
@@ -276,7 +286,15 @@ class WebSocketServer:
         if self._server is not None:
             raise RuntimeError("Server is already running")
 
-        self._server = await serve(self._handle_connection, self._host, self._port)
+        self._listener = await self._repo.add_listener(
+            f"ws://{'[' + self._host + ']' if ':' in self._host else self._host}:{self._port}"
+        )
+        try:
+            self._server = await serve(self._handle_connection, self._host, self._port)
+        except BaseException:
+            await self._listener.close()
+            self._listener = None
+            raise
 
     async def stop(self):
         """Stop the WebSocket server.
@@ -286,14 +304,13 @@ class WebSocketServer:
         if self._server is None:
             return
 
-        # Close the server (stop accepting new connections)
+        # Stop acceptance, then close the logical endpoint and its connections.
         self._server.close()
+        if self._listener is not None:
+            await self._listener.close()
+            self._listener = None
         await self._server.wait_closed()
         self._server = None
-
-        # Wait for all active connections to finish
-        if self._connections:
-            await asyncio.gather(*self._connections, return_exceptions=True)
         self._connections.clear()
 
     async def __aenter__(self):

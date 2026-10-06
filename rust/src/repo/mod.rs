@@ -90,7 +90,6 @@ pub fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Hub events
     m.add_class::<PyPeerInfo>()?;
-    m.add_class::<PyConnDirection>()?;
     m.add_class::<PyHubEvent>()?;
 
     // Hub results

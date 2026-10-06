@@ -33,6 +33,7 @@ module-name = "automerge._automerge"
 include = [
     { path = "README.md", format = "sdist" },
     { path = "CHANGELOG.md", format = "sdist" },
+    { path = "docs/**/*", format = "sdist" },
     { path = "LICENSE", format = "sdist" },
 ]
 

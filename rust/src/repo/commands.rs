@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 
-use super::hub_events::{HubEventKind, PyConnDirection, PyHubEvent};
+use super::hub_events::{HubEventKind, PyHubEvent};
 use super::types::{PyConnectionId, PyDocumentActorId, PyDocumentId};
 
 /// Wrapper for samod_core::CommandId
@@ -82,31 +82,6 @@ impl PyDispatchedCommand {
         PyDispatchedCommand {
             command_id,
             event: event.into(),
-        }
-    }
-
-    pub(crate) fn create_connection(direction: PyConnDirection) -> Self {
-        use samod_core::actors::hub::HubEvent;
-        use samod_core::network::{BackoffConfig, DialerConfig, ListenerConfig};
-
-        // Diagnostic only: Python supplies an already-established transport.
-        let url = "automerge-py://transport".parse().unwrap();
-        let registration = match direction {
-            PyConnDirection::Outgoing => HubEvent::add_dialer(DialerConfig {
-                url,
-                backoff: BackoffConfig {
-                    max_retries: Some(0),
-                    ..Default::default()
-                },
-            }),
-            PyConnDirection::Incoming => HubEvent::add_listener(ListenerConfig { url }),
-        };
-        Self {
-            command_id: registration.command_id,
-            event: HubEventKind::CreateConnection {
-                command_id: registration.command_id,
-                event: registration.event,
-            },
         }
     }
 
@@ -315,9 +290,14 @@ pub(crate) fn command_result_to_py(
             },
         )
         .map(|obj| obj.into()),
-        samod_core::actors::hub::CommandResult::AddDialer { .. }
-        | samod_core::actors::hub::CommandResult::AddListener { .. } => Err(
-            pyo3::exceptions::PyRuntimeError::new_err("Unexpected internal connector command"),
-        ),
+        samod_core::actors::hub::CommandResult::AddDialer { dialer_id } => {
+            Ok(u32::from(*dialer_id).into_pyobject(py)?.into_any().unbind())
+        }
+        samod_core::actors::hub::CommandResult::AddListener { listener_id } => {
+            Ok(u32::from(*listener_id)
+                .into_pyobject(py)?
+                .into_any()
+                .unbind())
+        }
     }
 }

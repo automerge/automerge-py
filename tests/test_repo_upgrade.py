@@ -5,9 +5,7 @@ from uuid import uuid4
 
 import pytest
 
-from automerge._automerge import ConnectionStateConnected
 from automerge.repo import AutomergeUrl, DocumentId, InMemoryStorage, Repo
-from automerge.transports import InMemoryTransport
 
 
 class GatedStorage(InMemoryStorage):
@@ -55,48 +53,19 @@ async def test_concurrent_find_waits_for_stored_document():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("with_peer", [False, True])
-async def test_find_unavailable_document(with_peer):
+async def test_find_unavailable_document(with_peer, memory_connection):
     repo = await Repo.load()
     peer = await Repo.load()
     missing = AutomergeUrl.from_document_id(DocumentId.from_bytes(uuid4().bytes))
-    connections = []
-    try:
-        async with repo, peer:
-            if with_peer:
-                outgoing, incoming = InMemoryTransport.create_pair()
-                connections = [
-                    asyncio.create_task(repo.connect(outgoing)),
-                    asyncio.create_task(peer.accept(incoming)),
-                ]
+    async with repo, peer:
+        if with_peer:
+            dialer, listener = await memory_connection(repo, peer)
 
-                async def wait_for_handshake():
-                    while not all(
-                        any(
-                            isinstance(connection.state, ConnectionStateConnected)
-                            for connection in current._hub.connections()
-                        )
-                        for current in (repo, peer)
-                    ):
-                        await asyncio.sleep(0.01)
+        assert await asyncio.wait_for(repo.find(missing), timeout=2) is None
 
-                await asyncio.wait_for(wait_for_handshake(), timeout=2)
-
+        if with_peer:
+            await asyncio.gather(dialer.close(), listener.close())
+            assert not repo._hub.connections() and not peer._hub.connections()
+            # Removed connectors must not leave potential connections that
+            # cause subsequent document searches to hang.
             assert await asyncio.wait_for(repo.find(missing), timeout=2) is None
-
-            if with_peer:
-                for connection in connections:
-                    connection.cancel()
-                await asyncio.gather(*connections, return_exceptions=True)
-
-                async def wait_for_disconnect():
-                    while repo._hub.connections() or peer._hub.connections():
-                        await asyncio.sleep(0.01)
-
-                await asyncio.wait_for(wait_for_disconnect(), timeout=2)
-                # Disconnected single-use transports must not leave a pending
-                # dialer that causes subsequent document searches to hang.
-                assert await asyncio.wait_for(repo.find(missing), timeout=2) is None
-    finally:
-        for connection in connections:
-            connection.cancel()
-        await asyncio.gather(*connections, return_exceptions=True)

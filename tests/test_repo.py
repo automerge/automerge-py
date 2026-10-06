@@ -41,7 +41,6 @@ from automerge._automerge import (
     StorageTaskPut,
 )
 from automerge.repo import InMemoryStorage, Repo
-from automerge.transports import InMemoryTransport
 
 
 def test_peer_id_creation():
@@ -1507,7 +1506,7 @@ async def test_repo_find_document():
 
 
 @pytest.mark.asyncio
-async def test_document_sync_basic():
+async def test_document_sync_basic(memory_connection):
     """Test basic document synchronization between two repos"""
     import asyncio
 
@@ -1521,15 +1520,7 @@ async def test_document_sync_basic():
     repo_b = await Repo.load(storage_b)
 
     async with repo_a, repo_b:
-        # Create paired transports
-        transport_a, transport_b = InMemoryTransport.create_pair()
-
-        # Connect the repos - Repo A initiates (client), Repo B accepts (server)
-        conn_task_a = asyncio.create_task(repo_a.connect(transport_a))
-        conn_task_b = asyncio.create_task(repo_b.accept(transport_b))
-
-        # Give some time for handshake to complete
-        await asyncio.sleep(1.0)  # Increased from 0.3 to allow full handshake
+        dialer, listener = await memory_connection(repo_a, repo_b)
 
         # Now create a document in Repo A (after connections are established)
         handle_a = await repo_a.create()
@@ -1561,26 +1552,7 @@ async def test_document_sync_basic():
         result = doc["title"]
         assert result == "Hello from Repo A", "Document content should have synced"
 
-        # Clean up - close transports to trigger disconnection
-        await transport_a.close()
-        await transport_b.close()
-
-        # Wait a bit for disconnection to complete
-        await asyncio.sleep(0.2)
-
-        # Cancel connection tasks
-        conn_task_a.cancel()
-        conn_task_b.cancel()
-
-        try:
-            await conn_task_a
-        except asyncio.CancelledError:
-            pass
-
-        try:
-            await conn_task_b
-        except asyncio.CancelledError:
-            pass
+        await asyncio.gather(dialer.close(), listener.close())
 
 
 @pytest.mark.asyncio

@@ -24,7 +24,8 @@ from automerge._automerge import (
     CommandResultCreateConnection,
     CommandResultCreateDocument,
     CommandResultFindDocument,
-    ConnDirection,
+    ConnectionEventConnectionFailed,
+    ConnectionEventHandshakeCompleted,
     ConnectionId,
     DisconnectAction,
     DispatchedCommand,
@@ -48,6 +49,17 @@ from automerge._automerge import (
     StorageTaskLoad,
     StorageTaskLoadRange,
     StorageTaskPut,
+)
+
+from .connectors import (
+    Backoff,
+    Connection,
+    ConnectorClosedError,
+    Dialer,
+    DialFailedError,
+    Listener,
+    PermanentDialError as PermanentDialError,
+    _validate_peer_id,
 )
 
 
@@ -455,6 +467,13 @@ class Repo:
         self._hub_task: Optional[asyncio.Task] = None
         self._hub_event_queue: asyncio.Queue[HubEvent] = asyncio.Queue()
         self._pending_commands: Dict[CommandId, asyncio.Future] = {}
+        self._command_callbacks: dict[CommandId, Callable] = {}
+        self._event_waiters: set[asyncio.Future] = set()
+        self._connections: dict[ConnectionId, Connection] = {}
+        self._dialers: dict[int, Dialer] = {}
+        self._listeners: dict[int, Listener] = {}
+        self._closing = False
+        self._stop_task: asyncio.Task | None = None
         self._shutdown_event = asyncio.Event()
         self._started = False
 
@@ -471,7 +490,6 @@ class Repo:
         self._recv_tasks: Dict[ConnectionId, asyncio.Task] = {}
         self._send_tasks: Dict[ConnectionId, asyncio.Task] = {}
         self._send_queues: Dict[ConnectionId, asyncio.Queue] = {}
-        self._conn_finished_futures: Dict[ConnectionId, asyncio.Future] = {}
 
         # Pending IO task tracking (for clean shutdown)
         self._pending_io_tasks: set = set()
@@ -595,34 +613,46 @@ class Repo:
         """
         if self._started:
             raise RuntimeError("Repo already started")
+        if self._closing:
+            raise ConnectorClosedError("Repo is closed")
 
         self._started = True
         self._hub_task = asyncio.create_task(self._hub_loop())
 
     async def stop(self):
-        """Stop the Hub event loop.
+        """Close all owned resources and stop the Hub, safely and idempotently."""
+        if self._stop_task is None:
+            if not self._started:
+                return
+            self._closing = True
+            self._stop_task = asyncio.create_task(self._stop())
+        await asyncio.shield(self._stop_task)
 
-        This signals shutdown and waits for the Hub loop to finish.
-        Safe to call multiple times.
-        """
-        if not self._started:
-            return
-
-        # Signal shutdown
+    async def _stop(self):
+        # Drain registrations queued before stop began before taking ownership
+        # snapshots. No new public connector registration is allowed now.
+        await self._dispatch_event(HubEvent.tick())
+        for connection in self._connections.values():
+            if connection._reason is None:
+                connection._reason = ConnFinishedReason.Shutdown
+        resources = list(self._dialers.values()) + list(self._listeners.values())
+        await asyncio.gather(*(resource.close() for resource in resources))
+        # Process stop before setting the Python loop's shutdown flag.
+        await self._dispatch_event(HubEvent.stop())
         self._shutdown_event.set()
-        await self._hub_event_queue.put(HubEvent.stop())
-
-        # Wait for Hub loop to finish processing the stop event
-        # This allows the hub to emit any DisconnectActions and clean up gracefully
         if self._hub_task:
             await self._hub_task
             self._hub_task = None
-
-        # After hub has stopped, cancel any remaining connection finished futures
-        # This will unblock any tasks still waiting on repo.connect()/repo.accept()
-        for future in list(self._conn_finished_futures.values()):
+        # Hub shutdown satisfies any outstanding removal/close notifications.
+        for future in list(self._event_waiters):
             if not future.done():
-                future.cancel()
+                future.set_result(None)
+        # Include registrations that were already queued when shutdown began.
+        resources = list(self._dialers.values()) + list(self._listeners.values())
+        await asyncio.gather(*(resource.close() for resource in resources))
+        await asyncio.gather(
+            *(self._finish_connection(conn_id) for conn_id in list(self._connections))
+        )
 
         # Wait for pending IO tasks (especially storage writes) to complete
         # before cancelling other tasks. This ensures data is persisted to disk
@@ -660,6 +690,10 @@ class Repo:
             if not future.done():
                 future.cancel()
 
+        self._command_callbacks.clear()
+        for future in list(self._event_waiters):
+            if not future.done():
+                future.cancel()
         self._started = False
 
     async def __aenter__(self):
@@ -694,9 +728,16 @@ class Repo:
                     # Send periodic tick event
                     event = HubEvent.tick()
 
-                # Process event through Hub
-                # print(f"[DEBUG HUB] Processing event: {type(event).__name__}")
-                results = self._hub.handle_event(time.time(), event)
+                event_waiter = None
+                if isinstance(event, tuple):
+                    event, event_waiter = event
+                # Process event through Hub.
+                try:
+                    results = self._hub.handle_event(time.time(), event)
+                except Exception as error:
+                    if event_waiter is not None and not event_waiter.done():
+                        event_waiter.set_exception(error)
+                    raise
 
                 # Execute new IO tasks
                 for io_task in results.new_tasks:
@@ -711,15 +752,41 @@ class Repo:
                         if conn_id not in self._send_queues:
                             self._send_queues[conn_id] = asyncio.Queue()
 
-                    if cmd_id in self._pending_commands:
-                        future = self._pending_commands.pop(cmd_id)
-                        if not future.done():
-                            future.set_result(cmd_result)
+                    future = self._pending_commands.pop(cmd_id, None)
+                    callback = self._command_callbacks.pop(cmd_id, None)
+                    if callback is not None:
+                        try:
+                            cmd_result = callback(cmd_result)
+                        except Exception as error:
+                            if future is not None and not future.done():
+                                future.set_exception(error)
+                            continue
+                    if future is not None and not future.done():
+                        future.set_result(cmd_result)
+                    elif callback is not None:
+                        # Cancellation must not leak a successful registration.
+                        self._create_io_task(cmd_result.close())
 
-                # Handle connection events
                 for conn_event in results.connection_events:
-                    # Connection events are informational - no action needed for now
-                    pass
+                    connection = self._connections.get(conn_event.connection_id)
+                    if connection is None:
+                        continue
+                    if isinstance(conn_event, ConnectionEventHandshakeCompleted):
+                        connection._handshake_completed(conn_event.peer_info.peer_id)
+                    elif isinstance(conn_event, ConnectionEventConnectionFailed):
+                        connection._failed(conn_event.error)
+
+                for dialer_id in results.failed_dialers:
+                    dialer = self._dialers.get(dialer_id)
+                    if dialer is not None:
+                        dialer._fail(
+                            dialer._last_error
+                            or DialFailedError("Retry budget exhausted")
+                        )
+                for dialer_id, _url in results.dial_requests:
+                    dialer = self._dialers.get(dialer_id)
+                    if dialer is not None:
+                        dialer._start_attempt()
 
                 # Handle document actor spawning
                 for spawn_args in results.spawn_actors:
@@ -732,6 +799,8 @@ class Repo:
                     else:
                         print(f"Warning: Message for unknown actor {actor_id}")
 
+                if event_waiter is not None and not event_waiter.done():
+                    event_waiter.set_result(None)
                 # Check if Hub stopped
                 if results.stopped:
                     break
@@ -827,34 +896,7 @@ class Repo:
             return None
 
         elif isinstance(action, DisconnectAction):
-            # Disconnect from peer
-            conn_id = action.connection_id
-
-            if conn_id in self._conn_finished_futures:
-                future = self._conn_finished_futures.pop(conn_id)
-                if not future.done():
-                    future.set_result(ConnFinishedReason.WeDisconnected)
-
-            # Close the transport
-            if conn_id in self._transports:
-                transport = self._transports[conn_id]
-                try:
-                    await transport.close()
-                except Exception as e:
-                    print(f"Error closing transport for connection {conn_id}: {e}")
-                del self._transports[conn_id]
-
-            # Cancel and clean up tasks
-            if conn_id in self._recv_tasks:
-                self._recv_tasks[conn_id].cancel()
-                del self._recv_tasks[conn_id]
-            if conn_id in self._send_tasks:
-                self._send_tasks[conn_id].cancel()
-                del self._send_tasks[conn_id]
-            if conn_id in self._send_queues:
-                del self._send_queues[conn_id]
-
-            # Return success result
+            await self._finish_connection(action.connection_id)
             return IoResult.from_disconnect_result(io_task.task_id)
 
         elif isinstance(action, CheckAnnouncePolicyAction):
@@ -919,24 +961,183 @@ class Repo:
 
             traceback.print_exc()
 
-    async def _dispatch_command(self, command: DispatchedCommand) -> Any:
-        """Dispatch a command to the Hub and wait for completion.
-
-        Args:
-            command: The command to dispatch
-
-        Returns:
-            The command result
-        """
-        # Create future for this command
-        future = asyncio.Future()
+    async def _dispatch_command(
+        self, command: DispatchedCommand, *, on_result: Callable | None = None
+    ) -> Any:
+        future = asyncio.get_running_loop().create_future()
         self._pending_commands[command.command_id] = future
-
-        # Send event to Hub
-        await self._hub_event_queue.put(command.event)
-
-        # Wait for completion
+        if on_result is not None:
+            self._command_callbacks[command.command_id] = on_result
+        self._hub_event_queue.put_nowait(command.event)
         return await future
+
+    async def _dispatch_event(self, event: HubEvent):
+        if not self._started or self._hub.is_stopped():
+            raise ConnectorClosedError("Repo is stopped")
+        future = asyncio.get_running_loop().create_future()
+        self._event_waiters.add(future)
+        self._hub_event_queue.put_nowait((event, future))
+        try:
+            await future
+        finally:
+            self._event_waiters.discard(future)
+
+    def _require_running(self):
+        if not self._started or self._closing or self._hub.is_stopped():
+            raise ConnectorClosedError("Repo must be running")
+
+    async def add_dialer(
+        self,
+        url: str,
+        *,
+        connect: Callable[[], Awaitable[Transport]],
+        backoff: Backoff = Backoff(),
+        expected_peer_id: PeerId | None = None,
+    ) -> Dialer:
+        """Register an outgoing connector; returns without waiting for a handshake.
+
+        ``connect`` must open a fresh transport on every attempt. Raise
+        ``PermanentDialError`` from it for failures that cannot be retried.
+        The repository owns the returned dialer until it is closed.
+        """
+        self._require_running()
+        if not callable(connect):
+            raise TypeError("connect must be a transport factory")
+        if not isinstance(backoff, Backoff):
+            raise TypeError("backoff must be a Backoff")
+        _validate_peer_id(expected_peer_id)
+        command = HubEvent.add_dialer(
+            url, backoff.initial_delay, backoff.max_delay, backoff.max_retries
+        )
+
+        def registered(dialer_id):
+            dialer = Dialer(self, dialer_id, url, connect, backoff, expected_peer_id)
+            self._dialers[dialer_id] = dialer
+            if self._closing:
+                self._create_io_task(dialer.close())
+            return dialer
+
+        return await self._dispatch_command(command, on_result=registered)
+
+    async def add_listener(self, url: str) -> Listener:
+        """Register a logical inbound endpoint; this does not bind a socket."""
+        self._require_running()
+        command = HubEvent.add_listener(url)
+
+        def registered(listener_id):
+            listener = Listener(self, listener_id, url)
+            self._listeners[listener_id] = listener
+            if self._closing:
+                self._create_io_task(listener.close())
+            return listener
+
+        return await self._dispatch_command(command, on_result=registered)
+
+    async def _remove_connector(self, connector):
+        for connection in connector._connections:
+            if connection._reason is None:
+                connection._reason = (
+                    ConnFinishedReason.Shutdown
+                    if self._closing
+                    else ConnFinishedReason.WeDisconnected
+                )
+        if isinstance(connector, Dialer):
+            event = HubEvent.remove_dialer(connector._id)
+            mapping = self._dialers
+        else:
+            event = HubEvent.remove_listener(connector._id)
+            mapping = self._listeners
+        if self._started and not self._hub.is_stopped():
+            await self._dispatch_event(event)
+        connections = list(connector._connections)
+        await asyncio.gather(*(connection.close() for connection in connections))
+        mapping.pop(connector._id, None)
+
+    async def _attach_transport(
+        self, command, transport, owner: Dialer | Listener
+    ) -> Connection:
+        if not self._started or self._hub.is_stopped():
+            await transport.close()
+            raise ConnectorClosedError("Repo is stopped")
+        if not all(
+            callable(getattr(transport, method, None))
+            for method in ("send", "recv", "close")
+        ):
+            if callable(getattr(transport, "close", None)):
+                await transport.close()
+            raise TypeError("Factory must return a Transport")
+
+        def attached(result):
+            conn_id = result.connection_id
+            connection = Connection(self, conn_id, transport, owner)
+            self._connections[conn_id] = connection
+            self._transports[conn_id] = transport
+            self._send_queues.setdefault(conn_id, asyncio.Queue())
+            owner._connections.add(connection)
+            if isinstance(owner, Dialer):
+                owner._current = connection
+            self._send_tasks[conn_id] = asyncio.create_task(
+                self._send_loop(conn_id, transport)
+            )
+            self._recv_tasks[conn_id] = asyncio.create_task(
+                self._recv_loop(conn_id, transport)
+            )
+            if self._closing:
+                connection._reason = ConnFinishedReason.Shutdown
+            if self._closing or owner.closed:
+                self._create_io_task(connection.close())
+            return connection
+
+        return await self._dispatch_command(command, on_result=attached)
+
+    def _connection_lost(self, conn_id, reason, error=None):
+        connection = self._connections.get(conn_id)
+        if connection is not None:
+            if connection._reason is None:
+                connection._reason = reason
+            if error is not None:
+                connection.error = error
+        if self._started and not self._hub.is_stopped():
+            self._hub_event_queue.put_nowait(HubEvent.connection_lost(conn_id))
+
+    async def _close_connection(self, connection):
+        if connection._finished.done():
+            return
+        if connection._reason is None:
+            connection._reason = ConnFinishedReason.WeDisconnected
+        if self._started and not self._hub.is_stopped():
+            await self._dispatch_event(HubEvent.connection_lost(connection._id))
+        await self._finish_connection(connection._id)
+        await connection.wait_closed()
+
+    async def _finish_connection(self, conn_id):
+        connection = self._connections.get(conn_id)
+        if connection is None:
+            return
+        if connection._cleanup_task is None:
+            connection._cleanup_task = asyncio.create_task(
+                self._cleanup_connection(connection)
+            )
+        await asyncio.shield(connection._cleanup_task)
+
+    async def _cleanup_connection(self, connection):
+        conn_id = connection._id
+        tasks = []
+        for mapping in (self._recv_tasks, self._send_tasks):
+            task = mapping.pop(conn_id, None)
+            if task is not None:
+                task.cancel()
+                tasks.append(task)
+        self._send_queues.pop(conn_id, None)
+        self._transports.pop(conn_id, None)
+        try:
+            await connection._transport.close()
+        except Exception as error:
+            connection.error = error
+        finally:
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self._connections.pop(conn_id, None)
+            connection._finish(connection._reason or ConnFinishedReason.WeDisconnected)
 
     async def _spawn_document_actor(self, spawn_args: SpawnArgs):
         """Spawn a new document actor.
@@ -1091,19 +1292,10 @@ class Repo:
                     await self._hub_event_queue.put(HubEvent.io_complete(result))
 
                 except asyncio.CancelledError:
-                    # Connection was disconnected from our side
-                    # Notify Hub about the disconnection
-                    await self._hub_event_queue.put(HubEvent.connection_lost(conn_id))
+                    self._connection_lost(conn_id, ConnFinishedReason.WeDisconnected)
                     break
                 except Exception as e:
-                    # Error sending - connection failed
-                    print(f"Error sending on connection {conn_id}: {e}")
-                    if conn_id in self._conn_finished_futures:
-                        future = self._conn_finished_futures.pop(conn_id)
-                        if not future.done():
-                            future.set_result(ConnFinishedReason.ErrorSending)
-                    # Notify Hub about connection lost
-                    await self._hub_event_queue.put(HubEvent.connection_lost(conn_id))
+                    self._connection_lost(conn_id, ConnFinishedReason.ErrorSending, e)
                     break
 
         finally:
@@ -1134,19 +1326,10 @@ class Repo:
                     await self._hub_event_queue.put(receive_cmd.event)
 
                 except asyncio.CancelledError:
-                    # Connection was disconnected from our side
-                    # Notify Hub about the disconnection
-                    await self._hub_event_queue.put(HubEvent.connection_lost(conn_id))
+                    self._connection_lost(conn_id, ConnFinishedReason.WeDisconnected)
                     break
                 except Exception as e:
-                    # Error receiving - connection failed
-                    print(f"Error receiving on connection {conn_id}: {e}")
-                    if conn_id in self._conn_finished_futures:
-                        future = self._conn_finished_futures.pop(conn_id)
-                        if not future.done():
-                            future.set_result(ConnFinishedReason.ErrorReceiving)
-                    # Notify Hub about connection lost
-                    await self._hub_event_queue.put(HubEvent.connection_lost(conn_id))
+                    self._connection_lost(conn_id, ConnFinishedReason.ErrorReceiving, e)
                     break
 
         finally:
@@ -1160,111 +1343,6 @@ class Repo:
                 self._send_tasks[conn_id].cancel()
             if conn_id in self._send_queues:
                 del self._send_queues[conn_id]
-
-    async def _establish_connection(
-        self, transport: Transport, direction: ConnDirection
-    ) -> ConnFinishedReason:
-        """Internal helper to establish a connection with the given direction.
-
-        Args:
-            transport: The transport to use for communication
-            direction: The connection direction (Outgoing or Incoming)
-
-        Returns:
-            The reason the connection finished
-        """
-        # Create connection command with the specified direction
-        command = HubEvent.create_connection(direction)
-
-        result = await self._dispatch_command(command)
-
-        # Result should be CommandResultCreateConnection
-        if not isinstance(result, CommandResultCreateConnection):
-            raise RuntimeError(f"Unexpected result type: {type(result)}")
-
-        conn_id = result.connection_id
-
-        # Store transport
-        self._transports[conn_id] = transport
-
-        # Send queue was already created in _hub_loop when the command completed
-        # Start the send loop to process messages from the queue
-        send_task = asyncio.create_task(self._send_loop(conn_id, transport))
-        self._send_tasks[conn_id] = send_task
-
-        # Create future for connection finished reason
-        future = asyncio.Future()
-        self._conn_finished_futures[conn_id] = future
-
-        # Start receive loop
-        recv_task = asyncio.create_task(self._recv_loop(conn_id, transport))
-        self._recv_tasks[conn_id] = recv_task
-
-        # Wait for connection to finish
-        try:
-            reason = await future
-            return reason
-        except asyncio.CancelledError:
-            # Shutdown - cancel receive task
-            recv_task.cancel()
-            try:
-                await recv_task
-            except asyncio.CancelledError:
-                pass
-            return ConnFinishedReason.Shutdown
-
-    async def connect(self, transport: Transport) -> ConnFinishedReason:
-        """Connect to another peer as a client (outgoing connection).
-
-        This method initiates a connection to a peer and manages the full lifecycle:
-        - Dispatches a create_connection command to the Hub with Outgoing direction
-        - Stores the transport for sending messages
-        - Starts a receive loop to handle incoming messages
-        - Waits until the connection finishes (due to shutdown, disconnect, or error)
-
-        Use this method when your application is acting as a client initiating
-        the connection. For server-side connections (accepting incoming connections),
-        use accept() instead.
-
-        Args:
-            transport: The transport to use for communication
-
-        Returns:
-            The reason the connection finished
-
-        Example:
-            >>> # Client side
-            >>> transport = await WebSocketClientTransport.connect("ws://server:8080")
-            >>> await repo.connect(transport)
-        """
-        return await self._establish_connection(transport, ConnDirection.Outgoing)
-
-    async def accept(self, transport: Transport) -> ConnFinishedReason:
-        """Accept an incoming connection from a peer (server-side).
-
-        This method accepts a connection from a peer and manages the full lifecycle:
-        - Dispatches a create_connection command to the Hub with Incoming direction
-        - Stores the transport for sending messages
-        - Starts a receive loop to handle incoming messages
-        - Waits until the connection finishes (due to shutdown, disconnect, or error)
-
-        Use this method when your application is acting as a server accepting
-        incoming connections. For client-side connections (initiating connections),
-        use connect() instead.
-
-        Args:
-            transport: The transport to use for communication
-
-        Returns:
-            The reason the connection finished
-
-        Example:
-            >>> # Server side
-            >>> async def handle_connection(websocket):
-            ...     transport = WebSocketServerTransport(websocket)
-            ...     await repo.accept(transport)
-        """
-        return await self._establish_connection(transport, ConnDirection.Incoming)
 
     async def create(self, doc: Optional[Dict[str, Any]] = None) -> "DocHandle":
         """Create a new document in the repository.

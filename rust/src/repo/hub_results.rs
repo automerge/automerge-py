@@ -221,6 +221,30 @@ impl PyHubResults {
             .collect()
     }
 
+    /// Transport creation requests: (dialer ID, URL).
+    #[getter]
+    fn dial_requests(&self) -> Vec<(u32, String)> {
+        self.inner
+            .dial_requests
+            .iter()
+            .map(|request| (request.dialer_id.into(), request.url.to_string()))
+            .collect()
+    }
+
+    /// Dialers whose retry budgets have been exhausted.
+    #[getter]
+    fn failed_dialers(&self) -> Vec<u32> {
+        self.inner
+            .dialer_events
+            .iter()
+            .map(|event| match event {
+                samod_core::network::DialerEvent::MaxRetriesReached { dialer_id, .. } => {
+                    (*dialer_id).into()
+                }
+            })
+            .collect()
+    }
+
     /// Check if the hub is stopped
     #[getter]
     fn stopped(&self) -> bool {
