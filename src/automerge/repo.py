@@ -23,7 +23,7 @@ from automerge._automerge import (
     CommandId,
     CommandResultCreateConnection,
     CommandResultCreateDocument,
-    CommandResultFindDocument,
+    CommandResultSearchForDoc,
     ConnectionEventConnectionFailed,
     ConnectionEventHandshakeCompleted,
     ConnectionId,
@@ -32,6 +32,9 @@ from automerge._automerge import (
     DocumentActor,
     DocumentActorId,
     DocumentId,
+    DocSearch as DocSearch,
+    DocSearchPhase as DocSearchPhase,
+    PeerRequestState as PeerRequestState,
     Hub,
     HubEvent,
     IoResult,
@@ -61,6 +64,7 @@ from .connectors import (
     PermanentDialError as PermanentDialError,
     _validate_peer_id,
 )
+from .search import Search, SearchClosedError as SearchClosedError
 
 
 class Storage(Protocol):
@@ -472,6 +476,7 @@ class Repo:
         self._connections: dict[ConnectionId, Connection] = {}
         self._dialers: dict[int, Dialer] = {}
         self._listeners: dict[int, Listener] = {}
+        self._searches: dict[DocumentId, set[Search]] = {}
         self._closing = False
         self._stop_task: asyncio.Task | None = None
         self._shutdown_event = asyncio.Event()
@@ -635,7 +640,11 @@ class Repo:
         for connection in self._connections.values():
             if connection._reason is None:
                 connection._reason = ConnFinishedReason.Shutdown
-        resources = list(self._dialers.values()) + list(self._listeners.values())
+        resources = (
+            list(self._dialers.values())
+            + list(self._listeners.values())
+            + [search for searches in self._searches.values() for search in searches]
+        )
         await asyncio.gather(*(resource.close() for resource in resources))
         # Process stop before setting the Python loop's shutdown flag.
         await self._dispatch_event(HubEvent.stop())
@@ -648,7 +657,11 @@ class Repo:
             if not future.done():
                 future.set_result(None)
         # Include registrations that were already queued when shutdown began.
-        resources = list(self._dialers.values()) + list(self._listeners.values())
+        resources = (
+            list(self._dialers.values())
+            + list(self._listeners.values())
+            + [search for searches in self._searches.values() for search in searches]
+        )
         await asyncio.gather(*(resource.close() for resource in resources))
         await asyncio.gather(
             *(self._finish_connection(conn_id) for conn_id in list(self._connections))
@@ -766,6 +779,12 @@ class Repo:
                     elif callback is not None:
                         # Cancellation must not leak a successful registration.
                         self._create_io_task(cmd_result.close())
+
+                # Registration callbacks above subscribe before same-batch
+                # updates, so a new search cannot miss its first transition.
+                for document_id, state in results.search_state_updates:
+                    for search in self._searches.get(document_id, ()):
+                        search._update(state)
 
                 for conn_event in results.connection_events:
                     connection = self._connections.get(conn_event.connection_id)
@@ -969,7 +988,20 @@ class Repo:
         if on_result is not None:
             self._command_callbacks[command.command_id] = on_result
         self._hub_event_queue.put_nowait(command.event)
-        return await future
+        try:
+            return await future
+        except asyncio.CancelledError:
+            if (
+                on_result is not None
+                and future.done()
+                and not future.cancelled()
+                and future.exception() is None
+            ):
+                # The hub delivered a resource, but cancellation won the race
+                # before this caller resumed and took ownership of it. The hub
+                # only cleans up futures cancelled before result delivery.
+                await future.result().close()
+            raise
 
     async def _dispatch_event(self, event: HubEvent):
         if not self._started or self._hub.is_stopped():
@@ -1364,6 +1396,34 @@ class Repo:
         # Return a handle to the document
         return DocHandle(result.actor_id, result.document_id, self)
 
+    async def search_for_doc(self, url: AutomergeUrl | str | DocumentId) -> Search:
+        """Searching for a document and subscribe to updates on the search state.
+
+        The returned handle exposes its current state and an async update stream.
+        """
+        self._require_running()
+        if isinstance(url, str):
+            document_id = AutomergeUrl.from_str(url).document_id()
+        elif isinstance(url, AutomergeUrl):
+            document_id = url.document_id()
+        elif isinstance(url, DocumentId):
+            document_id = url
+        else:
+            raise TypeError("url must be an AutomergeUrl, DocumentId, or string")
+
+        def registered(result):
+            if not isinstance(result, CommandResultSearchForDoc):
+                raise RuntimeError(f"Unexpected result type: {type(result)}")
+            search = Search(self, document_id, result.actor_id, result.search_state)
+            self._searches.setdefault(document_id, set()).add(search)
+            if self._closing:
+                self._create_io_task(search.close())
+            return search
+
+        return await self._dispatch_command(
+            HubEvent.search_for_doc(document_id), on_result=registered
+        )
+
     async def find(self, url: AutomergeUrl | str) -> Optional["DocHandle"]:
         """Find an existing document by URL.
 
@@ -1383,28 +1443,8 @@ class Repo:
             >>> if handle_b:
             ...     print("Document found!")
         """
-        document_id: DocumentId
-        if isinstance(url, str):
-            url2 = AutomergeUrl.from_str(url)
-            document_id = url2.document_id()
-        else:
-            # Extract document ID from URL
-            document_id = url.document_id()
-
-        # Dispatch find_document command
-        command = HubEvent.find_document(document_id)
-        result = await self._dispatch_command(command)
-
-        # Result should be CommandResultFindDocument
-        if not isinstance(result, CommandResultFindDocument):
-            raise RuntimeError(f"Unexpected result type: {type(result)}")
-
-        # If not found, return None
-        if not result.found:
-            return None
-
-        # Document was found - return a handle
-        return DocHandle(result.actor_id, document_id, self)
+        async with await self.search_for_doc(url) as search:
+            return await search.wait_result()
 
 
 class ChangeContext:

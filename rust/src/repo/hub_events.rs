@@ -51,26 +51,10 @@ impl From<samod_core::network::PeerInfo> for PyPeerInfo {
 /// Wrapper for samod_core::actors::hub::HubEvent
 ///
 /// Represents an event that can be sent to the Hub for processing.
-#[derive(Clone)]
-pub(crate) enum HubEventKind {
-    Core(samod_core::actors::hub::HubEvent),
-    FindDocument {
-        command_id: samod_core::CommandId,
-        document_id: samod_core::DocumentId,
-        event: samod_core::actors::hub::HubEvent,
-    },
-}
-
-impl From<samod_core::actors::hub::HubEvent> for HubEventKind {
-    fn from(event: samod_core::actors::hub::HubEvent) -> Self {
-        Self::Core(event)
-    }
-}
-
 #[pyclass(name = "HubEvent")]
 #[derive(Clone)]
 pub struct PyHubEvent {
-    pub(crate) inner: HubEventKind,
+    pub(crate) inner: samod_core::actors::hub::HubEvent,
 }
 
 #[pymethods]
@@ -82,7 +66,7 @@ impl PyHubEvent {
     #[staticmethod]
     fn io_complete(io_result: PyIoResult) -> Self {
         PyHubEvent {
-            inner: samod_core::actors::hub::HubEvent::io_complete(io_result.to_core()).into(),
+            inner: samod_core::actors::hub::HubEvent::io_complete(io_result.to_core()),
         }
     }
 
@@ -90,7 +74,7 @@ impl PyHubEvent {
     #[staticmethod]
     fn tick() -> Self {
         PyHubEvent {
-            inner: samod_core::actors::hub::HubEvent::tick().into(),
+            inner: samod_core::actors::hub::HubEvent::tick(),
         }
     }
 
@@ -101,7 +85,7 @@ impl PyHubEvent {
     #[staticmethod]
     fn connection_lost(connection_id: PyConnectionId) -> Self {
         PyHubEvent {
-            inner: samod_core::actors::hub::HubEvent::connection_lost(connection_id.0).into(),
+            inner: samod_core::actors::hub::HubEvent::connection_lost(connection_id.0),
         }
     }
 
@@ -109,7 +93,7 @@ impl PyHubEvent {
     #[staticmethod]
     fn stop() -> Self {
         PyHubEvent {
-            inner: samod_core::actors::hub::HubEvent::stop().into(),
+            inner: samod_core::actors::hub::HubEvent::stop(),
         }
     }
 
@@ -121,8 +105,7 @@ impl PyHubEvent {
     #[staticmethod]
     fn actor_message(actor_id: PyDocumentActorId, message: PyDocToHubMsg) -> Self {
         PyHubEvent {
-            inner: samod_core::actors::hub::HubEvent::actor_message(actor_id.0, message.inner)
-                .into(),
+            inner: samod_core::actors::hub::HubEvent::actor_message(actor_id.0, message.inner),
         }
     }
 
@@ -218,22 +201,21 @@ impl PyHubEvent {
                 dialer_id.into(),
                 error,
                 permanent,
-            )
-            .into(),
+            ),
         }
     }
 
     #[staticmethod]
     fn remove_dialer(dialer_id: u32) -> Self {
         Self {
-            inner: samod_core::actors::hub::HubEvent::remove_dialer(dialer_id.into()).into(),
+            inner: samod_core::actors::hub::HubEvent::remove_dialer(dialer_id.into()),
         }
     }
 
     #[staticmethod]
     fn remove_listener(listener_id: u32) -> Self {
         Self {
-            inner: samod_core::actors::hub::HubEvent::remove_listener(listener_id.into()).into(),
+            inner: samod_core::actors::hub::HubEvent::remove_listener(listener_id.into()),
         }
     }
 
@@ -248,16 +230,11 @@ impl PyHubEvent {
         PyDispatchedCommand::new(dispatched.command_id, dispatched.event)
     }
 
-    /// Create a command to find an existing document
-    ///
-    /// Args:
-    ///     document_id: The ID of the document to find
-    ///
-    /// Returns:
-    ///     DispatchedCommand with command_id and event
+    /// Start a document search and return its initial state.
     #[staticmethod]
-    fn find_document(document_id: PyDocumentId) -> PyDispatchedCommand {
-        PyDispatchedCommand::find_document(document_id.0)
+    fn search_for_doc(document_id: PyDocumentId) -> PyDispatchedCommand {
+        let command = samod_core::actors::hub::HubEvent::search_for_doc(document_id.0);
+        PyDispatchedCommand::new(command.command_id, command.event)
     }
 
     /// Create a command indicating that a document actor is ready

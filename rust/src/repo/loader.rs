@@ -140,9 +140,7 @@ impl PySamodLoader {
                 let py_hub = Py::new(
                     py,
                     PyHub {
-                        inner: std::sync::Arc::new(std::sync::Mutex::new(
-                            super::hub_compat::CompatHub::new(*hub),
-                        )),
+                        inner: std::sync::Arc::new(std::sync::Mutex::new(*hub)),
                     },
                 )?;
                 let state = PyLoaderStateLoaded {
