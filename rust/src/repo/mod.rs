@@ -107,6 +107,7 @@ pub fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHubToDocMsg>()?;
     m.add_class::<PyDocToHubMsg>()?;
     m.add_class::<PyDocActorResult>()?;
+    m.add_class::<PyWithDocResult>()?;
     m.add_class::<PyDocumentActor>()?;
 
     // Hub

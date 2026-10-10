@@ -1983,3 +1983,63 @@ async def test_change_commit_message():
         assert change is not None
         assert change.message is None
         assert before - 1 <= change.timestamp.timestamp() <= after + 1
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_broadcast(memory_connection):
+    """Ephemeral messages broadcast on one handle arrive on the peer handle.
+
+    Ephemeral messages are not persisted and do not modify the document.
+    """
+    storage_a = InMemoryStorage()
+    storage_b = InMemoryStorage()
+
+    repo_a = await Repo.load(storage_a)
+    repo_b = await Repo.load(storage_b)
+
+    async with repo_a, repo_b:
+        dialer, listener = await memory_connection(repo_a, repo_b)
+
+        handle_a = await repo_a.create()
+        with handle_a.change() as doc:
+            doc["key"] = "value"
+
+        # Sync to B and obtain a handle there
+        await asyncio.sleep(0.5)
+        handle_b = await repo_b.find(handle_a.url)
+        assert handle_b is not None
+
+        received_b = []
+        handle_b.on("ephemeral", received_b.append)
+
+        handle_a.broadcast(b"hello ephemeral")
+        await asyncio.sleep(0.5)
+
+        assert received_b == [b"hello ephemeral"]
+
+        # Bidirectional: B's broadcasts reach A
+        received_a = []
+        handle_a.on("ephemeral", received_a.append)
+
+        handle_b.broadcast(b"reply")
+        await asyncio.sleep(0.5)
+
+        assert received_a == [b"reply"]
+
+        # The message did not modify either document
+        assert handle_a.doc()["key"] == "value"
+        assert handle_b.doc()["key"] == "value"
+
+        await asyncio.gather(dialer.close(), listener.close())
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_event_validation():
+    """on() rejects unknown event names"""
+    storage = InMemoryStorage()
+    repo = await Repo.load(storage)
+
+    async with repo:
+        handle = await repo.create()
+        with pytest.raises(ValueError):
+            handle.on("bogus", lambda *args: None)

@@ -67,13 +67,11 @@ class Search(_Resource):
         None is not permanent failure: this subscription can subsequently become
         ready. Cancelling a wait leaves the subscription and other waiters alive.
         """
-        from .repo import DocHandle
-
         while True:
             self._changed.clear()
             self._require_open()
             if self.state.phase == DocSearchPhase.Ready:
-                return DocHandle(self._actor_id, self._document_id, self._repo)
+                return self._repo._new_doc_handle(self._actor_id, self._document_id)
             if self.state.is_currently_unavailable():
                 return None
             await self._changed.wait()
