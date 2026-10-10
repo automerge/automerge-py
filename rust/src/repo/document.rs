@@ -313,7 +313,18 @@ impl PyDocumentActor {
     ///
     /// Returns a ChangeGuard that holds the mutex and allows modifications.
     /// The guard must be ended via end_change() to commit or rollback.
-    fn begin_change(&self, py: Python) -> PyResult<ChangeGuard> {
+    ///
+    /// Args:
+    ///     message: Optional message describing the change, stored in the
+    ///         change metadata when the change commits.
+    ///     time: Optional unix timestamp (in seconds) recorded for the change
+    #[pyo3(signature=(message=None, time=None))]
+    fn begin_change(
+        &self,
+        py: Python,
+        message: Option<String>,
+        time: Option<f64>,
+    ) -> PyResult<ChangeGuard> {
         // Check if we're already in a change - nested changes are not supported
         let already_in_change = CURRENT_DOC_CONTEXT.with(|ctx| ctx.borrow().is_some());
         if already_in_change {
@@ -343,7 +354,7 @@ impl PyDocumentActor {
 
         // Create transaction on the borrowed document
         let mut doc_ref = py_doc.borrow_mut(py);
-        let py_tx = doc_ref.transaction()?;
+        let py_tx = doc_ref.transaction(message, time)?;
         drop(doc_ref);
         let py_tx = Py::new(py, py_tx)?;
 

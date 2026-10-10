@@ -2,6 +2,8 @@ import base64
 from datetime import datetime
 from typing import List, Optional, Tuple
 
+import pytest
+
 from automerge.core import ROOT, Document, ObjType, ScalarType, extract
 
 
@@ -188,3 +190,54 @@ def test_multi_author_changes() -> None:
         ("hi yo 😊", b"A"),
         ("hi yo 👋 😊", b"B"),
     ]
+
+
+# ===== Commit metadata (message / time) =====
+
+
+def test_commit_message_and_time() -> None:
+    doc = Document()
+    # `time` is unix seconds; int or float both work.
+    with doc.transaction(message="add key", time=1000) as tx:
+        tx.put(ROOT, "key", ScalarType.Str, "value")
+
+    change = doc.get_last_local_change()
+    assert change is not None
+    assert change.message == "add key"
+    # `time` is unix seconds, stored as-is like the JavaScript bindings.
+    # Timezone-aware UTC so `.timestamp()` is exact on every platform
+    # (regression: naive datetimes raise OSError on Windows for
+    # pre-1970-local values).
+    assert change.timestamp.tzinfo is not None
+    assert change.timestamp.timestamp() == 1000.0
+
+
+def test_commit_message_via_explicit_commit() -> None:
+    doc = Document()
+    tx = doc.transaction(message="explicit commit", time=2000)
+    tx.put(ROOT, "key", ScalarType.Int, 1)
+    tx.commit()
+
+    change = doc.get_last_local_change()
+    assert change is not None
+    assert change.message == "explicit commit"
+    assert change.timestamp.timestamp() == 2000.0
+
+
+def test_commit_message_rollback() -> None:
+    doc = Document()
+    with pytest.raises(RuntimeError):
+        with doc.transaction(message="doomed") as tx:
+            tx.put(ROOT, "key", ScalarType.Int, 1)
+            raise RuntimeError("boom")
+
+    assert doc.get_last_local_change() is None
+    assert extract(doc) == {}
+
+    # The message of a rolled back transaction must not leak into the next one
+    with doc.transaction() as tx:
+        tx.put(ROOT, "key", ScalarType.Int, 1)
+
+    change = doc.get_last_local_change()
+    assert change is not None
+    assert change.message is None

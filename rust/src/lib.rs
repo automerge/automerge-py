@@ -10,12 +10,13 @@ use ::automerge::{
 use am::{
     marks::{ExpandMark, Mark},
     sync::SyncDoc,
+    transaction::CommitOptions,
     ActorId,
 };
 use pyo3::{
     exceptions::{PyException, PyValueError},
     prelude::*,
-    types::{PyBool, PyBytes, PyDateTime, PyTuple},
+    types::{PyBool, PyBytes, PyDateTime, PyTuple, PyTzInfo},
 };
 
 mod repo;
@@ -51,6 +52,7 @@ thread_local! {
 pub(crate) struct Inner {
     pub(crate) doc_ref: DocumentRef,
     pub(crate) tx: Option<am::transaction::Transaction<'static>>,
+    pub(crate) commit_options: CommitOptions,
 }
 
 fn get_heads(heads: Option<Vec<PyChangeHash>>) -> Option<Vec<ChangeHash>> {
@@ -62,6 +64,7 @@ impl Inner {
         Self {
             doc_ref: DocumentRef::Owned(doc),
             tx: None,
+            commit_options: CommitOptions::default(),
         }
     }
 
@@ -69,6 +72,7 @@ impl Inner {
         Self {
             doc_ref: DocumentRef::Borrowed(Cell::new(Some(doc_ptr))),
             tx: None,
+            commit_options: CommitOptions::default(),
         }
     }
 
@@ -362,6 +366,7 @@ impl Document {
             inner: Arc::new(RwLock::new(Inner {
                 doc_ref: DocumentRef::Actor(actor),
                 tx: None,
+                commit_options: CommitOptions::default(),
             })),
         }
     }
@@ -416,7 +421,19 @@ impl Document {
         Ok(())
     }
 
-    fn transaction(&mut self) -> PyResult<Transaction> {
+    /// Start a transaction on this document.
+    ///
+    /// Args:
+    ///     message: Optional message describing the change. Stored in the
+    ///         change metadata and readable via `Change.message`.
+    ///     time: Optional unix timestamp (in seconds, int or float) recorded
+    ///         for the change.
+    ///
+    /// The message and time are applied when the transaction commits, either
+    /// via the context manager exiting normally or an explicit `commit()`.
+    /// Rolling back discards them.
+    #[pyo3(signature=(message=None, time=None))]
+    fn transaction(&mut self, message: Option<String>, time: Option<f64>) -> PyResult<Transaction> {
         let mut inner = self
             .inner
             .write()
@@ -434,6 +451,11 @@ impl Document {
         // live as long as the transaction.
         let tx = unsafe { transmute(doc.transaction()) };
         inner.tx = Some(tx);
+        inner.commit_options = CommitOptions {
+            message,
+            // Unix seconds, matching the JS library
+            time: time.map(|t| t.floor() as i64),
+        };
 
         Ok(Transaction {
             inner: Arc::clone(&self.inner),
@@ -742,11 +764,12 @@ impl Transaction {
             .inner
             .write()
             .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
+        let commit_options = std::mem::take(&mut inner.commit_options);
         if let Some(tx) = inner.tx.take() {
             if let Some(_exc_type) = exc_type {
                 tx.rollback();
             } else {
-                tx.commit();
+                tx.commit_with(commit_options);
             }
         }
         Ok(())
@@ -759,7 +782,8 @@ impl Transaction {
             .write()
             .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
         if let Some(tx) = inner.tx.take() {
-            tx.commit();
+            let commit_options = std::mem::take(&mut inner.commit_options);
+            tx.commit_with(commit_options);
         }
         Ok(())
     }
@@ -1244,6 +1268,11 @@ impl<'py> IntoPyObject<'py> for PyScalarValue {
     type Output = Bound<'py, Self::Target>;
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        // Hoisted for the Timestamp arm: UTC-aware so `.timestamp()` is exact
+        // arithmetic on every platform (a naive datetime is local time, which
+        // on Windows raises OSError for pre-1970-local values and otherwise
+        // shifts the value by the machine's timezone).
+        let utc = PyTzInfo::utc(py)?.to_owned();
         match self.0 {
             ScalarValue::Bytes(v) => (PyScalarType::Bytes, v.into_pyobject(py)?),
             ScalarValue::Str(v) => (PyScalarType::Str, v.into_pyobject(py)?.into_any()),
@@ -1256,8 +1285,7 @@ impl<'py> IntoPyObject<'py> for PyScalarValue {
             ),
             ScalarValue::Timestamp(v) => (
                 PyScalarType::Timestamp,
-                PyDateTime::from_timestamp(py, (v as f64) / 1000.0, None)
-                    .unwrap()
+                PyDateTime::from_timestamp(py, (v as f64) / 1000.0, Some(&utc))?
                     .into_pyobject(py)?
                     .into_any(),
             ),
@@ -1400,7 +1428,13 @@ impl PyChange {
 
     #[getter]
     fn timestamp<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDateTime>> {
-        PyDateTime::from_timestamp(py, (self.0.timestamp() as f64) / 1000.0, None)
+        // Change timestamps are unix seconds (scalar `Timestamp` *values* are
+        // milliseconds). UTC-aware so `.timestamp()` is exact arithmetic on
+        // every platform: a naive datetime is local time, which on Windows
+        // raises OSError for pre-1970-local values and otherwise shifts by
+        // the machine's timezone.
+        let utc = PyTzInfo::utc(py)?.to_owned();
+        PyDateTime::from_timestamp(py, self.0.timestamp() as f64, Some(&utc))
     }
 
     #[getter]

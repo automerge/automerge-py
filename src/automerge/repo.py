@@ -1464,14 +1464,30 @@ class ChangeContext:
         - Do not nest change() calls
     """
 
-    def __init__(self, handle: "DocHandle"):
+    def __init__(
+        self,
+        handle: "DocHandle",
+        message: Optional[str] = None,
+        time: Optional[float] = None,
+    ):
         """Initialize the change context.
 
         Args:
             handle: The DocHandle to modify
+            message: Optional message describing the change, stored in the
+                change metadata when the change commits
+            time: Optional unix timestamp (in seconds) recorded for the change.
         """
+        import time as time_module  # shadowed by the `time` parameter in this scope
+
         self._handle = handle
         self._guard = None
+        self._message = message
+        if time is None:
+            # Default to the current time, like the JavaScript bindings'
+            # `change({time})` option (Math.floor(Date.now() / 1000)).
+            time = time_module.time()
+        self._time = time
 
     def __enter__(self):
         """Enter the change context and return a mutable document proxy.
@@ -1489,7 +1505,7 @@ class ChangeContext:
             raise ValueError(f"Document actor {self._handle._actor_id} not found")
 
         # Begin the change - this acquires the mutex and creates a transaction
-        self._guard = actor.begin_change()
+        self._guard = actor.begin_change(self._message, self._time)
         tx = self._guard.transaction()
         return MapWriteProxy(tx, core.ROOT, None)
 
@@ -1605,11 +1621,22 @@ class DocHandle:
         # Wrap in MapReadProxy for Pythonic dict-like access
         return MapReadProxy(core_doc, core.ROOT, None)
 
-    def change(self) -> ChangeContext:
+    def change(
+        self,
+        message: Optional[str] = None,
+        time: Optional[float] = None,
+    ) -> ChangeContext:
         """Return a context manager for modifying the document.
 
+        Args:
+            message: Optional message describing the change. Stored in the
+                change metadata and readable via ``Change.message`` on the
+                last local change.
+            time: Optional unix timestamp (in seconds, int or float) recorded
+                for the change.
+
         Example:
-            with handle.change() as doc:
+            with handle.change(message="update key") as doc:
                 doc["key"] = "value"
                 doc["count"] = 42
 
@@ -1621,7 +1648,7 @@ class DocHandle:
         Returns:
             ChangeContext: A context manager that provides mutable document access
         """
-        return ChangeContext(self)
+        return ChangeContext(self, message=message, time=time)
 
     def on(self, event: str, callback: Callable) -> None:
         """Register a callback for a document event.

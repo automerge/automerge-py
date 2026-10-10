@@ -16,6 +16,10 @@
 - `automerge.core.Document.load_incremental()` to import encoded changes, change
   bundles, or saved documents, and `get_missing_deps()` to inspect missing change
   dependencies. The `Change` type is now exported from `automerge.core`.
+- Commit metadata: `Document.transaction(message=..., time=...)`,
+  `automerge.Document.change(message=..., time=...)`, and
+  `DocHandle.change(message=..., time=...)` now set a change message and
+  timestamp.
 
 ### Changed
 
@@ -29,6 +33,17 @@
 
 ### Fixed
 
+- `Change.timestamp` now interprets the change's timestamp as unix seconds,
+  matching the JavaScript bindings and automerge-rs. It previously divided
+  by 1000 (assuming milliseconds, which only applies to scalar `Timestamp`
+  *values*), so changes written by JavaScript peers displayed as January
+  1970.
+- `Change.timestamp` and scalar `Timestamp` values are now returned as
+  timezone-aware UTC `datetime`s. They were previously naive local-time
+  `datetime`s, which made `datetime.timestamp()` fail with `OSError` on
+  Windows for values before 1970 local time, and shift the value by the
+  machine's timezone elsewhere. Timezone-aware datetimes round-trip
+  exactly on every platform.
 - Boolean values assigned through the high-level API now round-trip as
   `True`/`False` instead of integers.
 - Updated Intel macOS wheel builds to use the `macos-15-intel` runner, and aligned
