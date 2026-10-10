@@ -1950,3 +1950,36 @@ async def test_context_cleanup_after_success():
         # Verify
         doc = handle.doc()
         assert doc["value"] == 2
+
+
+@pytest.mark.asyncio
+async def test_change_commit_message():
+    """Test that change(message=..., time=...) is stored in the change metadata"""
+    storage = InMemoryStorage()
+    repo = await Repo.load(storage)
+
+    async with repo:
+        doc_handle = await repo.create()
+        await asyncio.sleep(0.1)
+
+        with doc_handle.change(message="hello", time=1000) as doc:
+            doc["key"] = "value"
+
+        await asyncio.sleep(0.1)
+
+        change = doc_handle.doc()._doc.get_last_local_change()
+        assert change is not None
+        assert change.message == "hello"
+        assert change.timestamp.timestamp() == 1000.0
+
+        # Without a message the change metadata is unset, and `time` defaults
+        # to the current time (like @automerge/automerge's change())
+        before = time.time()
+        with doc_handle.change() as doc:
+            doc["key"] = "value2"
+        after = time.time()
+
+        change = doc_handle.doc()._doc.get_last_local_change()
+        assert change is not None
+        assert change.message is None
+        assert before - 1 <= change.timestamp.timestamp() <= after + 1

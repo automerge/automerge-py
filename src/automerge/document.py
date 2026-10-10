@@ -576,6 +576,22 @@ class Document(MapReadProxy):
         super().__init__(self._doc, core.ROOT, None)
 
     @contextmanager
-    def change(self) -> Iterator[MapWriteProxy]:
-        with self._doc.transaction() as tx:
+    def change(
+        self,
+        message: Optional[str] = None,
+        time: Optional[float] = None,
+    ) -> Iterator[MapWriteProxy]:
+        """Open a change context on this document.
+
+        Args:
+            message: Optional message describing the change. Stored in the
+                change metadata and readable via ``Change.message``.
+            time: Optional unix timestamp (in seconds, int or float) recorded
+                for the change.
+        """
+        if time is None:
+            # Default to the current time, like the JavaScript bindings'
+            # `change({time})` option (Math.floor(Date.now() / 1000)).
+            time = datetime.now().timestamp()
+        with self._doc.transaction(message=message, time=time) as tx:
             yield MapWriteProxy(tx, core.ROOT, None)
