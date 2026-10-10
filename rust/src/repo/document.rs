@@ -305,6 +305,28 @@ impl PyDocumentActor {
         Ok(crate::Document::new_from_actor(self.inner.clone()))
     }
 
+    /// Broadcast an ephemeral message to all peers connected to this document.
+    ///
+    /// The message is not persisted and does not modify the document. It is
+    /// sent as an ephemeral wire message to every connected peer of this
+    /// document; peers receive it through their "ephemeral" document event.
+    ///
+    /// Args:
+    ///     now: Current timestamp as seconds since epoch.
+    ///     message: The message bytes to broadcast.
+    ///
+    /// Returns:
+    ///     DocActorResult containing the side effects (outgoing messages),
+    ///     which the caller must process.
+    #[pyo3(signature=(now, message))]
+    fn broadcast(&self, now: f64, message: Vec<u8>) -> PyDocActorResult {
+        let timestamp = samod_core::UnixTimestamp::from_millis((now * 1000.0) as u128);
+        let mut actor = self.inner.lock().unwrap();
+        PyDocActorResult {
+            inner: actor.broadcast(timestamp, message),
+        }
+    }
+
     fn __repr__(&self) -> String {
         "DocumentActor(...)".to_string()
     }

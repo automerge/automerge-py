@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+import weakref
 from enum import Enum
 from pathlib import Path
 from typing import (
@@ -29,6 +30,7 @@ from automerge._automerge import (
     ConnectionId,
     DisconnectAction,
     DispatchedCommand,
+    DocActorResult,
     DocumentActor,
     DocumentActorId,
     DocumentId,
@@ -52,6 +54,7 @@ from automerge._automerge import (
     StorageTaskLoad,
     StorageTaskLoadRange,
     StorageTaskPut,
+    WithDocResult,
 )
 
 from .connectors import (
@@ -489,6 +492,12 @@ class Repo:
         self._actor_to_doc: Dict[
             DocumentActorId, DocumentId
         ] = {}  # Maps actor_id to document_id
+        # Live document handles, for dispatching events (e.g. ephemeral
+        # messages) originating from document actors. Weak so handle lifetime
+        # is not extended by the repo.
+        self._doc_handles: weakref.WeakValueDictionary[DocumentId, DocHandle] = (
+            weakref.WeakValueDictionary()
+        )
 
         # Connection management
         self._transports: Dict[ConnectionId, Transport] = {}
@@ -1018,6 +1027,46 @@ class Repo:
         if not self._started or self._closing or self._hub.is_stopped():
             raise ConnectorClosedError("Repo must be running")
 
+    def _emit_ephemeral_messages(
+        self, actor_id: DocumentActorId, messages: List[bytes]
+    ) -> None:
+        """Dispatch ephemeral messages received by a document actor to its handle.
+
+        Ephemeral messages arrive as raw data bytes (the session/count bookkeeping
+        is handled internally and not exposed). If no live handle exists for the
+        document, the messages are dropped.
+        """
+        document_id = self._actor_to_doc.get(actor_id)
+        if document_id is None:
+            return
+        handle = self._doc_handles.get(document_id)
+        if handle is None:
+            return
+        for data in messages:
+            handle._emit("ephemeral", data)
+
+    def _dispatch_actor_result(
+        self, actor_id: DocumentActorId, result: DocActorResult | WithDocResult
+    ) -> None:
+        """Process the side effects of a document actor result.
+
+        Executes document IO tasks, forwards outgoing messages to the hub,
+        and dispatches ephemeral messages to the document handle. Used by every
+        path that produces a result: spawning a document actor, the document
+        actor loop, IO completion, `DocHandle.broadcast()`, and
+        `DocHandle.change()`. The result may contain side effects even when a
+        transaction was rolled back.
+        """
+        for io_task in result.io_tasks:
+            self._create_io_task(self._handle_doc_actor_io(actor_id, io_task))
+
+        for msg in result.outgoing_messages:
+            # The queue is unbounded so this never blocks
+            self._hub_event_queue.put_nowait(HubEvent.actor_message(actor_id, msg))
+
+        if result.ephemeral_messages:
+            self._emit_ephemeral_messages(actor_id, result.ephemeral_messages)
+
     async def add_dialer(
         self,
         url: str,
@@ -1191,14 +1240,8 @@ class Repo:
         queue = asyncio.Queue()
         self._doc_actor_queues[actor_id] = queue
 
-        # Handle initial IO tasks from spawn
-        for io_task in initial_result.io_tasks:
-            self._create_io_task(self._handle_doc_actor_io(actor_id, io_task))
-
-        # Handle initial outgoing messages
-        for msg in initial_result.outgoing_messages:
-            # Send message back to Hub event queue
-            await self._hub_event_queue.put(HubEvent.actor_message(actor_id, msg))
+        # Process the initial side effects (io tasks, outgoing messages)
+        self._dispatch_actor_result(actor_id, initial_result)
 
         # Start the actor's control loop
         task = self._create_io_task(self._document_actor_loop(actor_id))
@@ -1224,15 +1267,9 @@ class Repo:
                 # Process message through document actor
                 result = actor.handle_message(time.time(), msg)
 
-                # Execute IO tasks
-                for io_task in result.io_tasks:
-                    self._create_io_task(self._handle_doc_actor_io(actor_id, io_task))
-
-                # Send outgoing messages to Hub
-                for outgoing_msg in result.outgoing_messages:
-                    await self._hub_event_queue.put(
-                        HubEvent.actor_message(actor_id, outgoing_msg)
-                    )
+                # Process the side effects (io tasks, outgoing and ephemeral
+                # messages)
+                self._dispatch_actor_result(actor_id, result)
 
                 # Check if actor stopped
                 if result.stopped:
@@ -1270,17 +1307,9 @@ class Repo:
                 actor = self._doc_actors[actor_id]
                 doc_result = actor.handle_io_complete(time.time(), result)
 
-                # Execute any new IO tasks that resulted
-                for new_io_task in doc_result.io_tasks:
-                    self._create_io_task(
-                        self._handle_doc_actor_io(actor_id, new_io_task)
-                    )
-
-                # Handle outgoing messages
-                for outgoing_msg in doc_result.outgoing_messages:
-                    await self._hub_event_queue.put(
-                        HubEvent.actor_message(actor_id, outgoing_msg)
-                    )
+                # Process the side effects (io tasks, outgoing and ephemeral
+                # messages)
+                self._dispatch_actor_result(actor_id, doc_result)
 
         except Exception as e:
             print(f"Error handling IO task for document actor {actor_id}: {e}")
@@ -1376,6 +1405,22 @@ class Repo:
             if conn_id in self._send_queues:
                 del self._send_queues[conn_id]
 
+    def _new_doc_handle(
+        self, actor_id: DocumentActorId, document_id: DocumentId
+    ) -> "DocHandle":
+        """Create a `DocHandle` and register it for event dispatch.
+
+        Registration puts the handle into `_doc_handles` (a weak-value
+        registry) so events originating from the document actor — e.g.
+        ephemeral messages — can be dispatched to it. A later handle for the
+        same document replaces an earlier one; the registry does not extend
+        handle lifetime. Every `DocHandle` construction site must go through
+        this helper, or the handle will silently miss events.
+        """
+        handle = DocHandle(actor_id, document_id, self)
+        self._doc_handles[document_id] = handle
+        return handle
+
     async def create(self, doc: Optional[Dict[str, Any]] = None) -> "DocHandle":
         """Create a new document in the repository.
 
@@ -1394,7 +1439,7 @@ class Repo:
             raise RuntimeError(f"Unexpected result type: {type(result)}")
 
         # Return a handle to the document
-        return DocHandle(result.actor_id, result.document_id, self)
+        return self._new_doc_handle(result.actor_id, result.document_id)
 
     async def search_for_doc(self, url: AutomergeUrl | str | DocumentId) -> Search:
         """Searching for a document and subscribe to updates on the search state.
@@ -1527,19 +1572,10 @@ class ChangeContext:
             commit = exc_type is None
             result = self._guard.end_change(commit, time.time())
 
-            # Always process side effects - DocActorResult may contain effects
-            # even if the transaction was rolled back
-            for io_task in result.io_tasks:
-                self._handle._repo._create_io_task(
-                    self._handle._repo._handle_doc_actor_io(
-                        self._handle._actor_id, io_task
-                    )
-                )
-
-            for msg in result.outgoing_messages:
-                self._handle._repo._hub_event_queue.put_nowait(
-                    HubEvent.actor_message(self._handle._actor_id, msg)
-                )
+            # Always process side effects - the result may contain effects
+            # (io tasks, outgoing or ephemeral messages) even if the
+            # transaction was rolled back
+            self._handle._repo._dispatch_actor_result(self._handle._actor_id, result)
 
             # Emit change event only if there were actual changes
             if result.patches:
@@ -1569,6 +1605,33 @@ class DocHandle:
         self._document_id = document_id
         self._repo = repo
         self._event_callbacks: Dict[str, List[Callable]] = {}
+
+    def broadcast(self, message: bytes) -> None:
+        """Broadcast an ephemeral message to all peers connected to this document.
+
+        The message is not persisted and does not modify the document. It is
+        sent as an ephemeral wire message to every connected peer of this
+        document; peers receive it through their ``"ephemeral"`` document
+        event callbacks (registered via :meth:`on`).
+
+        This is interoperable with the ``@automerge/automerge-repo`` JavaScript
+        ephemeral/gossip messages.
+
+        Args:
+            message: The message bytes to broadcast.
+
+        Example:
+            >>> handle.on("ephemeral", lambda msg: print("got", msg))
+            >>> handle.broadcast(b"cursor at 4,2")
+        """
+        self._repo._require_running()
+
+        actor = self._repo._doc_actors.get(self._actor_id)
+        if actor is None:
+            raise ValueError(f"Document actor {self._actor_id} not found")
+
+        result = actor.broadcast(time.time(), message)
+        self._repo._dispatch_actor_result(self._actor_id, result)
 
     @property
     def url(self) -> AutomergeUrl:
@@ -1654,10 +1717,12 @@ class DocHandle:
         """Register a callback for a document event.
 
         Args:
-            event: The event name (currently only "change" is supported)
+            event: The event name. Either ``"change"`` or ``"ephemeral"``.
             callback: The function to call when the event occurs.
                      For "change" events, the callback receives a list of patches
                      describing the changes made to the document.
+                     For "ephemeral" events, the callback receives the raw message
+                     bytes broadcast by a peer via :meth:`broadcast`.
 
         Example:
             >>> def on_change(patches):
@@ -1666,7 +1731,16 @@ class DocHandle:
             >>> with handle.change() as doc:
             ...     doc["key"] = "value"
             # Will print "Document changed! N patches"
+
+            >>> def on_ephemeral(message):
+            ...     print("got ephemeral", message)
+            >>> handle.on("ephemeral", on_ephemeral)
+            >>> handle.broadcast(b"hello")
         """
+        if event not in ("change", "ephemeral"):
+            raise ValueError(
+                f"Unknown event {event!r}: expected 'change' or 'ephemeral'"
+            )
         if event not in self._event_callbacks:
             self._event_callbacks[event] = []
         self._event_callbacks[event].append(callback)
