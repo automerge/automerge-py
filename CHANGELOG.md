@@ -20,6 +20,12 @@
   `automerge.Document.change(message=..., time=...)`, and
   `DocHandle.change(message=..., time=...)` now set a change message and
   timestamp.
+- It is now possible to associate an "author" with any change in the document.
+  This is achieved by setting the `author` constructor argument (an arbitrary
+  byte array) when creating a `Document`, or by using the `set_author()` method.
+  The author information is stored in the change metadata and can be retrieved
+  using the `get_author()` method.
+
 
 ### Changed
 

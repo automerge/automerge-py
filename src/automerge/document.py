@@ -571,9 +571,39 @@ def _infer_scalar_type(value: core.ScalarValue) -> core.ScalarType:
 
 
 class Document(MapReadProxy):
-    def __init__(self, actor_id: Optional[ActorId] = None) -> None:
-        self._doc = core.Document(actor_id.id if actor_id else None)
+    def __init__(
+        self,
+        actor_id: Optional[ActorId] = None,
+        author: Optional[bytes] = None,
+    ) -> None:
+        """Create a new document.
+
+        Args:
+            actor_id: Optional actor ID for this peer's edits.
+            author: Optional author bytes identifying who makes this
+                document's edits, independently of actor IDs. Changing the
+                author generates a fresh actor ID; when using authors, never
+                manually manage actor IDs.
+        """
+        self._doc = core.Document(
+            actor_id.id if actor_id else None,
+            author,
+        )
         super().__init__(self._doc, core.ROOT, None)
+
+    @property
+    def author(self) -> Optional[bytes]:
+        """The author set for this document's subsequent edits, if any."""
+        return self._doc.get_author()
+
+    def set_author(self, author: Optional[bytes]) -> None:
+        """Set the author for this document's subsequent edits.
+
+        The author is only changed if it differs from the current author
+        (``self.author``); changing the author generates a fresh actor ID for
+        subsequent edits. Pass ``None`` to clear the author.
+        """
+        self._doc.set_author(author)
 
     @contextmanager
     def change(

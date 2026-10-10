@@ -11,7 +11,7 @@ use am::{
     marks::{ExpandMark, Mark},
     sync::SyncDoc,
     transaction::CommitOptions,
-    ActorId,
+    ActorId, Author,
 };
 use pyo3::{
     exceptions::{PyException, PyValueError},
@@ -375,11 +375,14 @@ impl Document {
 #[pymethods]
 impl Document {
     #[new]
-    #[pyo3(signature=(actor_id=None))]
-    fn new(actor_id: Option<&[u8]>) -> Self {
+    #[pyo3(signature=(actor_id=None, author=None))]
+    fn new(actor_id: Option<&[u8]>, author: Option<&[u8]>) -> Self {
         let mut doc = am::Automerge::new();
         if let Some(id) = actor_id {
             doc.set_actor(ActorId::from(id));
+        }
+        if let Some(author) = author {
+            doc.set_author(Some(Author::from(author.to_vec())));
         }
         Document {
             inner: Arc::new(RwLock::new(Inner::new(doc))),
@@ -419,6 +422,110 @@ impl Document {
         let doc = inner.doc_mut()?;
         doc.set_actor(ActorId::from(actor_id));
         Ok(())
+    }
+
+    /// Set the author for this document.
+    ///
+    /// An author identifies the user (or application) making changes,
+    /// independently of actor IDs: unlike actor IDs it is stable across
+    /// sessions and survives save/load and merge. The assignment is stored
+    /// in the extra bytes of the changes and is readable via `Change.author`.
+    ///
+    /// The author is only changed if it differs from the current author
+    /// (`Document.get_author()`); changing the author generates a fresh
+    /// actor ID for subsequent edits. When using authors, never manually
+    /// manage actor IDs.
+    ///
+    /// Args:
+    ///     author: The author bytes, or `None` to clear the author.
+    #[pyo3(signature=(author=None))]
+    fn set_author(&mut self, author: Option<&[u8]>) -> PyResult<()> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+
+        // Check if this is a borrowed document
+        if inner.is_borrowed() {
+            return Err(PyException::new_err(
+                "cannot set author on a borrowed document",
+            ));
+        }
+
+        // Drop the read lock before acquiring write lock
+        drop(inner);
+
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|e| PyException::new_err(format!("error getting write lock: {}", e)))?;
+
+        // Get mutable reference to the document
+        let doc = inner.doc_mut()?;
+        doc.set_author(author.map(|a| Author::from(a.to_vec())));
+        Ok(())
+    }
+
+    /// Get the current author of this document.
+    ///
+    /// This is the author set for subsequent edits (via `set_author` or the
+    /// `author=` constructor / load arguments), not the authors of historical
+    /// changes (see `get_authors`).
+    fn get_author(&self) -> PyResult<Option<Vec<u8>>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.with_doc(|doc| doc.get_author().map(|a| a.as_bytes().to_vec()))
+    }
+
+    /// Get all authors which appear in this document.
+    ///
+    /// That is, the authors assigned to any actor which has made changes in
+    /// this document.
+    fn get_authors(&self) -> PyResult<Vec<Vec<u8>>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.with_doc(|doc| {
+            doc.get_authors()
+                .iter()
+                .map(|a| a.as_bytes().to_vec())
+                .collect()
+        })
+    }
+
+    /// Get the actor IDs which have made changes as the given author.
+    ///
+    /// Args:
+    ///     author: The author bytes.
+    fn get_actors_for_author(&self, author: &[u8]) -> PyResult<Vec<Vec<u8>>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.with_doc(|doc| {
+            doc.get_actors_for_author(&Author::from(author.to_vec()))
+                .iter()
+                .map(|a| a.to_bytes().to_vec())
+                .collect()
+        })
+    }
+
+    /// Get the author assigned to the given actor, if any.
+    ///
+    /// Args:
+    ///     actor_id: The actor ID bytes.
+    fn get_author_for_actor(&self, actor_id: &[u8]) -> PyResult<Option<Vec<u8>>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.with_doc(|doc| {
+            doc.get_author_for_actor(&ActorId::from(actor_id))
+                .map(|a| a.as_bytes().to_vec())
+        })
     }
 
     /// Start a transaction on this document.
@@ -635,8 +742,15 @@ impl Document {
     }
 
     #[staticmethod]
-    fn load(data: &[u8]) -> PyResult<Self> {
-        let doc = am::Automerge::load(data).map_err(|e| PyException::new_err(e.to_string()))?;
+    #[pyo3(signature=(data, author=None))]
+    fn load(data: &[u8], author: Option<&[u8]>) -> PyResult<Self> {
+        // Set the author for subsequent edits when loading, if given.
+        let mut options = am::LoadOptions::new();
+        if let Some(author) = author {
+            options = options.author(Author::from(author.to_vec()));
+        }
+        let doc = am::Automerge::load_with_options(data, options)
+            .map_err(|e| PyException::new_err(e.to_string()))?;
         Ok(Document {
             inner: Arc::new(RwLock::new(Inner::new(doc))),
         })
@@ -1409,6 +1523,16 @@ impl PyChange {
     #[getter]
     fn message(&self) -> Option<String> {
         self.0.message().map(str::to_owned)
+    }
+
+    /// The author assigned to the actor of this change, if any.
+    ///
+    /// Only the assignment stored with this individual change is returned; changes made by an
+    /// actor after its initial assignment may not carry one (use `Document.get_author_for_actor`
+    /// to resolve through the document's actor-to-author mapping).
+    #[getter]
+    fn author(&self) -> Option<Vec<u8>> {
+        self.0.author().map(|a| a.as_bytes().to_vec())
     }
 
     #[getter]
