@@ -137,6 +137,10 @@ factories, retry policies, identity checks, and lifecycle examples.
 inspect search progress or keep watching for later availability, use
 `Repo.search_for_doc()`. See the [document-search guide](docs/search.md).
 
+Use `Repo.load(share_policy=...)` to grant read-only access or deny document
+sharing per peer. See the [access-control guide](docs/share-policy.md) for policy
+async iterators, live permission updates, and migration from one-shot callbacks.
+
 ### Using S3 Storage
 
 The `automerge.storages.s3` module provides S3-backed storage for persisting documents:

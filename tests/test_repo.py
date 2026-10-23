@@ -8,8 +8,8 @@ import pytest
 
 from automerge._automerge import (
     AutomergeUrl,
-    CheckAnnouncePolicyAction,
-    CheckAnnouncePolicyResultPayload,
+    CheckSharePolicyAction,
+    CheckSharePolicyResultPayload,
     CommandId,
     ConnectionId,
     ConnectionInfo,
@@ -18,7 +18,7 @@ from automerge._automerge import (
     DisconnectResultPayload,
     DocumentActorId,
     DocumentId,
-    DocumentIoResultCheckAnnouncePolicy,
+    DocumentIoResultCheckSharePolicy,
     DocumentIoResultStorage,
     Hub,
     IoResult,
@@ -40,7 +40,7 @@ from automerge._automerge import (
     StorageTaskLoadRange,
     StorageTaskPut,
 )
-from automerge.repo import InMemoryStorage, Repo
+from automerge.repo import InMemoryStorage, Repo, ShareConfig
 
 
 def test_peer_id_creation():
@@ -533,7 +533,7 @@ def test_io_task():
     # - StorageTaskAction (contains a StorageTask)
     # - SendAction (contains connection_id and message bytes)
     # - DisconnectAction (contains connection_id)
-    # - CheckAnnouncePolicyAction (contains peer_id)
+    # - CheckSharePolicyAction (contains peer_id)
     #
     # These types are tested through integration tests with actual
     # loader/hub usage where IoTask instances are naturally created.
@@ -542,7 +542,7 @@ def test_io_task():
     assert StorageTaskAction is not None
     assert SendAction is not None
     assert DisconnectAction is not None
-    assert CheckAnnouncePolicyAction is not None
+    assert CheckSharePolicyAction is not None
 
 
 def test_io_result():
@@ -552,7 +552,7 @@ def test_io_result():
     # - StorageResultPayload (contains a StorageResult that can be consumed once)
     # - SendResultPayload (empty - just indicates send completed)
     # - DisconnectResultPayload (empty - just indicates disconnect completed)
-    # - CheckAnnouncePolicyResultPayload (contains should_announce boolean)
+    # - CheckSharePolicyResultPayload (contains a ShareConfig)
     #
     # These types are tested through integration tests with actual
     # loader/hub usage where IoResult instances are naturally created.
@@ -561,7 +561,7 @@ def test_io_result():
     assert StorageResultPayload is not None
     assert SendResultPayload is not None
     assert DisconnectResultPayload is not None
-    assert CheckAnnouncePolicyResultPayload is not None
+    assert CheckSharePolicyResultPayload is not None
 
 
 # ===== InMemoryStorage Tests =====
@@ -854,18 +854,18 @@ def test_hub_io_result():
 
 def test_document_io_result():
     """Test DocumentIoResult creation and type checking with subclasses"""
-    # Create CheckAnnouncePolicy result
-    announce_result = DocumentIoResultCheckAnnouncePolicy(True)
-    assert isinstance(announce_result, DocumentIoResultCheckAnnouncePolicy)
-    assert not isinstance(announce_result, DocumentIoResultStorage)
-    assert announce_result.should_announce
-    print(f"✓ DocumentIoResultCheckAnnouncePolicy(True): {announce_result}")
+    # Create CheckSharePolicy result
+    share_result = DocumentIoResultCheckSharePolicy(ShareConfig.read_write())
+    assert isinstance(share_result, DocumentIoResultCheckSharePolicy)
+    assert not isinstance(share_result, DocumentIoResultStorage)
+    assert share_result.config == ShareConfig.read_write()
+    print(f"✓ DocumentIoResultCheckSharePolicy: {share_result}")
 
     # Create Storage result
     storage_result = StorageResult.put()
     doc_result = DocumentIoResultStorage(storage_result)
     assert isinstance(doc_result, DocumentIoResultStorage)
-    assert not isinstance(doc_result, DocumentIoResultCheckAnnouncePolicy)
+    assert not isinstance(doc_result, DocumentIoResultCheckSharePolicy)
     # Access the stored storage_result field
     assert doc_result.storage_result.is_put()
     print(f"✓ DocumentIoResultStorage(): {doc_result}")

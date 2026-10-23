@@ -20,7 +20,7 @@ from typing import (
 
 from automerge._automerge import (
     AutomergeUrl,
-    CheckAnnouncePolicyAction,
+    CheckSharePolicyAction,
     CommandId,
     CommandResultCreateConnection,
     CommandResultCreateDocument,
@@ -39,6 +39,7 @@ from automerge._automerge import (
     PeerRequestState as PeerRequestState,
     Hub,
     HubEvent,
+    HubToDocMsg,
     IoResult,
     IoTask,
     LoaderStateLoaded,
@@ -68,6 +69,15 @@ from .connectors import (
     _validate_peer_id,
 )
 from .search import Search, SearchClosedError as SearchClosedError
+from .share_policy import (
+    ShareAccess as ShareAccess,
+    ShareConfig as ShareConfig,
+    SharePolicy as SharePolicy,
+    SharePolicyFunc as SharePolicyFunc,
+    SharePolicyType as SharePolicyType,
+    _SharePolicyManager,
+    _validate_share_policy,
+)
 
 
 class Storage(Protocol):
@@ -116,48 +126,6 @@ class Storage(Protocol):
             key: The storage key to delete
         """
         ...
-
-
-# Announce Policy Types
-
-
-class AnnouncePolicy(Protocol):
-    """Protocol for class-based announce policies.
-
-    Announce policies control which documents are announced to which peers during
-    synchronization. This allows for privacy, security, and performance optimization
-    by selectively sharing documents based on custom logic.
-
-    Implement this protocol by providing an async `should_announce` method that
-    returns True if a document should be announced to a peer, False otherwise.
-
-    Example:
-        class TrustedPeerPolicy:
-            def __init__(self, trusted_peers: set[str]):
-                self.trusted_peers = trusted_peers
-
-            async def should_announce(self, document_id: str, peer_id: str) -> bool:
-                return peer_id in self.trusted_peers
-    """
-
-    async def should_announce(self, document_id: str, peer_id: str) -> bool:
-        """Check if a document should be announced to a peer.
-
-        Args:
-            document_id: The document ID to potentially announce
-            peer_id: The peer ID requesting the document
-
-        Returns:
-            True if the document should be announced, False otherwise
-        """
-        ...
-
-
-# Function-based announce policy type
-AnnouncePolicyFunc = Callable[[str, str], Awaitable[bool]]
-
-# Combined type for Repo parameter
-AnnouncePolicyType = Union[AnnouncePolicyFunc, AnnouncePolicy, None]
 
 
 class InMemoryStorage:
@@ -456,7 +424,8 @@ class Repo:
         storage: Storage,
         peer_id: PeerId,
         hub: Hub,
-        announce_policy: AnnouncePolicyType = None,
+        *,
+        share_policy: SharePolicyType = None,
     ):
         """Initialize a repository (internal - use Repo.load() instead).
 
@@ -464,13 +433,12 @@ class Repo:
             storage: Storage adapter for persisting repository data
             peer_id: The peer ID for this repository
             hub: The loaded Hub instance
-            announce_policy: Optional policy to control document announcement to peers.
-                If None, all documents are announced to all peers (default).
+            share_policy: Access-control policy; see Repo.load().
         """
         self._storage = storage
         self._peer_id = peer_id
         self._hub = hub
-        self._announce_policy = announce_policy
+        self._policies = _SharePolicyManager(share_policy, self._apply_share_policy)
         self._hub_task: Optional[asyncio.Task] = None
         self._hub_event_queue: asyncio.Queue[HubEvent] = asyncio.Queue()
         self._pending_commands: Dict[CommandId, asyncio.Future] = {}
@@ -513,7 +481,8 @@ class Repo:
         cls,
         storage: Optional[Storage] = None,
         peer_id: Optional[bytes] = None,
-        announce_policy: AnnouncePolicyType = None,
+        *,
+        share_policy: SharePolicyType = None,
     ) -> "Repo":
         """Load a repository from storage.
 
@@ -524,43 +493,21 @@ class Repo:
         Args:
             storage: Storage adapter for persisting repository data
             peer_id: Optional peer ID bytes. If None, a random ID is generated.
-            announce_policy: Optional policy to control which documents are announced
-                to which peers during synchronization. Can be:
-                - An async function: `async def policy(document_id: str, peer_id: str) -> bool`
-                - An object implementing the AnnouncePolicy protocol with an async
-                  `should_announce(document_id, peer_id)` method
-                - None (default): all documents are announced to all peers
-
-                Example function-based policy:
-                    ```python
-                    async def allow_public_docs(document_id: str, peer_id: str) -> bool:
-                        # Only announce documents starting with "public-"
-                        return document_id.startswith("public-")
-
-                    repo = await Repo.load(storage, announce_policy=allow_public_docs)
-                    ```
-
-                Example class-based policy with state:
-                    ```python
-                    class TrustedPeerPolicy:
-                        def __init__(self, trusted_peers: set[str]):
-                            self.trusted_peers = trusted_peers
-
-                        async def should_announce(self, document_id: str, peer_id: str) -> bool:
-                            return peer_id in self.trusted_peers
-
-                    policy = TrustedPeerPolicy({"peer-alice", "peer-bob"})
-                    repo = await Repo.load(storage, announce_policy=policy)
-                    ```
-
-                Error Handling: If the policy raises an exception during evaluation,
-                the error is logged and the document is NOT announced (fail-closed for
-                security). This ensures that policy errors don't accidentally leak
-                sensitive documents.
+            share_policy: A ShareConfig, a callable returning AsyncIterator[ShareConfig],
+                or an object whose share_config(document_id, peer_id) returns that
+                iterator. Async generators are supported; the call is not awaited.
+                One stream is shared by all active connections for a document/peer.
+                Each yielded decision updates permissions, in order. Before the
+                first decision no traffic is allowed. Exhaustion retains the last
+                decision (or denies if empty); errors and invalid values deny access.
+                Streams are cancelled and closed when no longer needed.
+                Defaults to read-write access with announcements enabled.
 
         Returns:
             A loaded Repo instance (not yet started)
         """
+        _validate_share_policy(share_policy)
+
         # Create peer ID
         py_peer_id = PeerId.from_string(peer_id.hex()) if peer_id else PeerId.random()
 
@@ -615,7 +562,12 @@ class Repo:
                 break
 
         # Create and return the Repo instance
-        return cls(storage, py_peer_id, hub, announce_policy)
+        return cls(storage, py_peer_id, hub, share_policy=share_policy)
+
+    @property
+    def peer_id(self) -> PeerId:
+        """This repository's network identity (not an authentication credential)."""
+        return self._peer_id
 
     async def start(self):
         """Start the Hub event loop.
@@ -639,10 +591,12 @@ class Repo:
             if not self._started:
                 return
             self._closing = True
+            self._policies.begin_close()
             self._stop_task = asyncio.create_task(self._stop())
         await asyncio.shield(self._stop_task)
 
     async def _stop(self):
+        await self._policies.close()
         # Drain registrations queued before stop began before taking ownership
         # snapshots. No new public connector registration is allowed now.
         await self._dispatch_event(HubEvent.tick())
@@ -840,45 +794,11 @@ class Repo:
 
                 traceback.print_exc()
 
-    async def _check_announce_policy(self, document_id: str, peer_id: str) -> bool:
-        """Check announce policy for a document and peer.
-
-        Args:
-            document_id: The document ID to check
-            peer_id: The peer ID to check against
-
-        Returns:
-            True if the document should be announced, False otherwise
-        """
-        if self._announce_policy is None:
-            # Default: announce everything (backwards compatible)
-            return True
-
-        try:
-            if callable(self._announce_policy):
-                # Async function
-                return await self._announce_policy(document_id, peer_id)
-            else:
-                # Class-based policy
-                return await self._announce_policy.should_announce(document_id, peer_id)
-        except Exception as e:
-            # Fail closed: deny on error for security
-            print(
-                f"Error in announce policy check for document {document_id}, peer {peer_id}: {e}"
-            )
-            import traceback
-
-            traceback.print_exc()
-            return False
-
-    async def _execute_io_task(
-        self, io_task: IoTask, actor_id: Optional[DocumentActorId] = None
-    ) -> IoResult:
+    async def _execute_io_task(self, io_task: IoTask) -> IoResult | None:
         """Execute a single IO task and return the result.
 
         Args:
             io_task: The IO task to execute
-            actor_id: Optional document actor ID for document-specific tasks
 
         Returns:
             The result of executing the task
@@ -926,31 +846,6 @@ class Repo:
         elif isinstance(action, DisconnectAction):
             await self._finish_connection(action.connection_id)
             return IoResult.from_disconnect_result(io_task.task_id)
-
-        elif isinstance(action, CheckAnnouncePolicyAction):
-            # Check announce policy
-            if actor_id is None:
-                raise ValueError("actor_id required for CheckAnnouncePolicyAction")
-
-            # Look up document_id from actor_id
-            document_id = self._actor_to_doc.get(actor_id)
-            if document_id is None:
-                # Actor not found - deny by default
-                print(
-                    f"Warning: actor_id {actor_id} not found in _actor_to_doc mapping"
-                )
-                should_announce = False
-            else:
-                # Get peer_id from action and check policy
-                peer_id = str(action.peer_id)
-                document_id_str = str(document_id)
-                should_announce = await self._check_announce_policy(
-                    document_id_str, peer_id
-                )
-
-            return IoResult.from_check_announce_policy_result(
-                io_task.task_id, should_announce=should_announce
-            )
 
         raise ValueError(f"Unknown IO task action type: {type(action)}")
 
@@ -1045,6 +940,20 @@ class Repo:
         for data in messages:
             handle._emit("ephemeral", data)
 
+    def _apply_share_policy(
+        self, actor_id: DocumentActorId, peer_id: PeerId, config: ShareConfig
+    ) -> None:
+        """Apply a decision and its side effects without queuing a stale update."""
+        actor = self._doc_actors.get(actor_id)
+        if self._closing or actor is None:
+            return
+        # Samod updates all peer connections and supersedes initial checks,
+        # so the first decision and cached decisions need no special IO handling.
+        result = actor.handle_message(
+            time.time(), HubToDocMsg.update_share_policy(peer_id, config)
+        )
+        self._dispatch_actor_result(actor_id, result)
+
     def _dispatch_actor_result(
         self, actor_id: DocumentActorId, result: DocActorResult | WithDocResult
     ) -> None:
@@ -1057,8 +966,10 @@ class Repo:
         `DocHandle.change()`. The result may contain side effects even when a
         transaction was rolled back.
         """
-        for io_task in result.io_tasks:
-            self._create_io_task(self._handle_doc_actor_io(actor_id, io_task))
+        # Actor connections, not transport cleanup timing, determine stream lifetime.
+        self._policies.reconcile(
+            actor_id, self._doc_actors[actor_id].share_policy_peers()
+        )
 
         for msg in result.outgoing_messages:
             # The queue is unbounded so this never blocks
@@ -1066,6 +977,16 @@ class Repo:
 
         if result.ephemeral_messages:
             self._emit_ephemeral_messages(actor_id, result.ephemeral_messages)
+
+        # Cached decisions apply synchronously and dispatch another result.
+        # Forward this result's messages first to preserve status order.
+        for io_task in result.io_tasks:
+            if isinstance(io_task.action, CheckSharePolicyAction):
+                self._policies.register(
+                    actor_id, self._actor_to_doc[actor_id], io_task.action.peer_id
+                )
+            else:
+                self._create_io_task(self._handle_doc_actor_io(actor_id, io_task))
 
     async def add_dialer(
         self,
@@ -1281,15 +1202,14 @@ class Repo:
 
             traceback.print_exc()
         finally:
-            # Clean up
-            if actor_id in self._doc_actors:
-                del self._doc_actors[actor_id]
-            if actor_id in self._doc_actor_queues:
-                del self._doc_actor_queues[actor_id]
-            if actor_id in self._doc_actor_tasks:
-                del self._doc_actor_tasks[actor_id]
-            if actor_id in self._actor_to_doc:
-                del self._actor_to_doc[actor_id]
+            # Detach before awaiting cleanup: late storage IO must not restart
+            # subscriptions on an actor whose control loop has already stopped.
+            self._policies.begin_close(actor_id)
+            self._doc_actors.pop(actor_id, None)
+            self._doc_actor_queues.pop(actor_id, None)
+            self._doc_actor_tasks.pop(actor_id, None)
+            self._actor_to_doc.pop(actor_id, None)
+            await self._policies.close(actor_id)
 
     async def _handle_doc_actor_io(self, actor_id: DocumentActorId, io_task: IoTask):
         """Execute an IO task for a document actor.
@@ -1299,8 +1219,7 @@ class Repo:
             io_task: The IO task to execute
         """
         try:
-            # Execute the IO task (pass actor_id for document-specific tasks)
-            result = await self._execute_io_task(io_task, actor_id)
+            result = await self._execute_io_task(io_task)
 
             # Get the actor and feed the result back
             if actor_id in self._doc_actors:
@@ -1607,11 +1526,11 @@ class DocHandle:
         self._event_callbacks: Dict[str, List[Callable]] = {}
 
     def broadcast(self, message: bytes) -> None:
-        """Broadcast an ephemeral message to all peers connected to this document.
+        """Broadcast an ephemeral message to allowed peers for this document.
 
         The message is not persisted and does not modify the document. It is
-        sent as an ephemeral wire message to every connected peer of this
-        document; peers receive it through their ``"ephemeral"`` document
+        sent to connected peers with read-only or read-write access, never to
+        denied peers. Peers receive it through their ``"ephemeral"`` document
         event callbacks (registered via :meth:`on`).
 
         This is interoperable with the ``@automerge/automerge-repo`` JavaScript

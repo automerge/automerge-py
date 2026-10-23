@@ -9,6 +9,10 @@ use pyo3::types::PyBytes;
 use samod_core::actors::document::io::{DocumentIoResult, DocumentIoTask};
 use samod_core::actors::hub::io::{HubIoAction, HubIoResult};
 
+use super::share::{
+    PyCheckSharePolicyAction, PyCheckSharePolicyResultPayload, PyDocumentIoResultCheckSharePolicy,
+    PyShareConfig,
+};
 use super::storage::{
     PyStorageResult, PyStorageTaskDelete, PyStorageTaskLoad, PyStorageTaskLoadRange,
     PyStorageTaskPut,
@@ -162,26 +166,6 @@ impl PyDisconnectAction {
     }
 }
 
-/// Action for checking document announce policy
-#[pyclass(name = "CheckAnnouncePolicyAction")]
-#[derive(Clone)]
-pub struct PyCheckAnnouncePolicyAction {
-    #[pyo3(get)]
-    pub peer_id: PyPeerId,
-}
-
-#[pymethods]
-impl PyCheckAnnouncePolicyAction {
-    #[new]
-    fn new(peer_id: PyPeerId) -> Self {
-        PyCheckAnnouncePolicyAction { peer_id }
-    }
-
-    fn __repr__(&self) -> String {
-        format!("CheckAnnouncePolicyAction(peer_id={})", self.peer_id.0)
-    }
-}
-
 // ===== Hub IO Result =====
 
 /// Send result for Hub IO operations
@@ -267,38 +251,6 @@ impl PyDocumentIoResultStorage {
     }
 }
 
-/// CheckAnnouncePolicy result for Document IO operations
-#[pyclass(name = "DocumentIoResultCheckAnnouncePolicy")]
-#[derive(Clone)]
-pub struct PyDocumentIoResultCheckAnnouncePolicy {
-    #[pyo3(get)]
-    should_announce: bool,
-}
-
-#[pymethods]
-impl PyDocumentIoResultCheckAnnouncePolicy {
-    #[new]
-    fn new(should_announce: bool) -> Self {
-        PyDocumentIoResultCheckAnnouncePolicy { should_announce }
-    }
-
-    fn __repr__(&self) -> String {
-        format!(
-            "DocumentIoResultCheckAnnouncePolicy({})",
-            self.should_announce
-        )
-    }
-}
-
-impl PyDocumentIoResultCheckAnnouncePolicy {
-    /// Convert to the underlying Rust enum variant
-    pub(crate) fn to_rust(&self) -> samod_core::actors::document::io::DocumentIoResult {
-        samod_core::actors::document::io::DocumentIoResult::CheckAnnouncePolicy(
-            self.should_announce,
-        )
-    }
-}
-
 // ===== IoTask =====
 
 /// Wrapper for samod_core::io::IoTask<Action>
@@ -307,7 +259,7 @@ impl PyDocumentIoResultCheckAnnouncePolicy {
 /// - StorageTaskAction
 /// - SendAction
 /// - DisconnectAction
-/// - CheckAnnouncePolicyAction
+/// - CheckSharePolicyAction
 #[pyclass(name = "IoTask")]
 pub struct PyIoTask {
     #[pyo3(get)]
@@ -458,9 +410,9 @@ impl From<samod_core::io::IoTask<DocumentIoTask>> for PyIoTask {
                         .unwrap()
                         .into()
                 }
-                DocumentIoTask::CheckAnnouncePolicy { peer_id } => Py::new(
+                DocumentIoTask::CheckSharePolicy { peer_id } => Py::new(
                     py,
-                    PyCheckAnnouncePolicyAction {
+                    PyCheckSharePolicyAction {
                         peer_id: PyPeerId(peer_id),
                     },
                 )
@@ -522,9 +474,9 @@ pub(crate) fn document_io_task_ref_to_py(
                 .unwrap()
                 .into()
         }
-        DocumentIoTask::CheckAnnouncePolicy { peer_id } => Py::new(
+        DocumentIoTask::CheckSharePolicy { peer_id } => Py::new(
             py,
-            PyCheckAnnouncePolicyAction {
+            PyCheckSharePolicyAction {
                 peer_id: PyPeerId(peer_id.clone()),
             },
         )
@@ -568,29 +520,6 @@ impl PyStorageResultPayload {
     }
 }
 
-/// Payload for check announce policy results
-#[pyclass(name = "CheckAnnouncePolicyResultPayload")]
-#[derive(Clone)]
-pub struct PyCheckAnnouncePolicyResultPayload {
-    #[pyo3(get)]
-    pub should_announce: bool,
-}
-
-#[pymethods]
-impl PyCheckAnnouncePolicyResultPayload {
-    #[new]
-    fn new(should_announce: bool) -> Self {
-        PyCheckAnnouncePolicyResultPayload { should_announce }
-    }
-
-    fn __repr__(&self) -> String {
-        format!(
-            "CheckAnnouncePolicyResultPayload(should_announce={})",
-            self.should_announce
-        )
-    }
-}
-
 /// Payload for send operation results (success indicator)
 #[pyclass(name = "SendResultPayload")]
 #[derive(Clone)]
@@ -631,7 +560,7 @@ impl PyDisconnectResultPayload {
 ///
 /// Represents the result of an IO task with an ID and a payload. The payload can be one of:
 /// - StorageResultPayload
-/// - CheckAnnouncePolicyResultPayload
+/// - CheckSharePolicyResultPayload
 /// - SendResultPayload
 /// - DisconnectResultPayload
 #[pyclass(name = "IoResult")]
@@ -703,37 +632,36 @@ impl PyIoResult {
     ///
     /// Args:
     ///     task_id: The IO task ID
-    ///     doc_result: The DocumentIoResultStorage or DocumentIoResultCheckAnnouncePolicy
+    ///     doc_result: A storage or share-policy result
     #[staticmethod]
     fn from_document_result<'py>(
         task_id: PyIoTaskId,
         doc_result: &Bound<'py, PyAny>,
     ) -> PyResult<Self> {
         Python::with_gil(|py| {
-            let payload: PyObject =
-                if let Ok(storage) = doc_result.extract::<PyDocumentIoResultStorage>() {
-                    Py::new(
-                        py,
-                        PyStorageResultPayload {
-                            result: std::sync::Mutex::new(Some(storage.storage_result.0.clone())),
-                        },
-                    )?
-                    .into()
-                } else if let Ok(announce) =
-                    doc_result.extract::<PyDocumentIoResultCheckAnnouncePolicy>()
-                {
-                    Py::new(
-                        py,
-                        PyCheckAnnouncePolicyResultPayload {
-                            should_announce: announce.should_announce,
-                        },
-                    )?
-                    .into()
-                } else {
-                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        "Expected DocumentIoResultStorage or DocumentIoResultCheckAnnouncePolicy",
-                    ));
-                };
+            let payload: PyObject = if let Ok(storage) =
+                doc_result.extract::<PyDocumentIoResultStorage>()
+            {
+                Py::new(
+                    py,
+                    PyStorageResultPayload {
+                        result: std::sync::Mutex::new(Some(storage.storage_result.0.clone())),
+                    },
+                )?
+                .into()
+            } else if let Ok(share) = doc_result.extract::<PyDocumentIoResultCheckSharePolicy>() {
+                Py::new(
+                    py,
+                    PyCheckSharePolicyResultPayload {
+                        config: share.config,
+                    },
+                )?
+                .into()
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "Expected DocumentIoResultStorage or DocumentIoResultCheckSharePolicy",
+                ));
+            };
             Ok(PyIoResult { task_id, payload })
         })
     }
@@ -760,17 +688,16 @@ impl PyIoResult {
         })
     }
 
-    /// Create an IoResult for a check announce policy operation
+    /// Create an IoResult for a share policy decision.
     #[staticmethod]
-    fn from_check_announce_policy_result(
+    fn from_check_share_policy_result(
         task_id: PyIoTaskId,
-        should_announce: bool,
+        config: PyShareConfig,
     ) -> PyResult<Self> {
         Python::with_gil(|py| {
             Ok(PyIoResult {
                 task_id,
-                payload: Py::new(py, PyCheckAnnouncePolicyResultPayload { should_announce })?
-                    .into(),
+                payload: Py::new(py, PyCheckSharePolicyResultPayload { config })?.into(),
             })
         })
     }
@@ -805,13 +732,11 @@ impl PyIoResult {
                     // Extract the storage result from the payload
                     let storage_result = storage_payload.borrow(py).take_result()?;
                     DocumentIoResult::Storage(storage_result.0)
-                } else if let Ok(announce_payload) =
-                    payload_obj.extract::<PyCheckAnnouncePolicyResultPayload>()
-                {
-                    DocumentIoResult::CheckAnnouncePolicy(announce_payload.should_announce)
+                } else if let Ok(share) = payload_obj.extract::<PyCheckSharePolicyResultPayload>() {
+                    DocumentIoResult::CheckSharePolicy(share.config.0)
                 } else {
                     return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        "Expected StorageResultPayload or CheckAnnouncePolicyResultPayload",
+                        "Expected StorageResultPayload or CheckSharePolicyResultPayload",
                     ));
                 };
 
@@ -904,11 +829,14 @@ impl From<samod_core::io::IoResult<DocumentIoResult>> for PyIoResult {
                 )
                 .unwrap()
                 .into(),
-                DocumentIoResult::CheckAnnouncePolicy(should_announce) => {
-                    Py::new(py, PyCheckAnnouncePolicyResultPayload { should_announce })
-                        .unwrap()
-                        .into()
-                }
+                DocumentIoResult::CheckSharePolicy(config) => Py::new(
+                    py,
+                    PyCheckSharePolicyResultPayload {
+                        config: PyShareConfig(config),
+                    },
+                )
+                .unwrap()
+                .into(),
             };
             PyIoResult {
                 task_id: PyIoTaskId(result.task_id),

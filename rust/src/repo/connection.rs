@@ -136,6 +136,14 @@ pub struct PyPeerDocState {
     /// The last heads of the document that the peer said they had (as strings)
     #[pyo3(get)]
     pub last_acked_heads: Option<Vec<crate::PyChangeHash>>,
+
+    /// Local permissions for this peer, or None while the policy is pending.
+    #[pyo3(get)]
+    pub share_config: Option<super::share::PyShareConfig>,
+
+    /// Whether the remote peer grants us read-only access.
+    #[pyo3(get)]
+    pub peer_read_only: bool,
 }
 
 #[pymethods]
@@ -154,6 +162,8 @@ impl PyPeerDocState {
 impl From<&samod_core::network::PeerDocState> for PyPeerDocState {
     fn from(state: &samod_core::network::PeerDocState) -> Self {
         PyPeerDocState {
+            share_config: state.share_config.map(super::share::PyShareConfig),
+            peer_read_only: state.peer_read_only,
             last_received: state.last_received.map(|ts| ts.as_millis() as f64 / 1000.0),
             last_sent: state.last_sent.map(|ts| ts.as_millis() as f64 / 1000.0),
             last_sent_heads: state

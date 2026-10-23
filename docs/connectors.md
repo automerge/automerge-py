@@ -99,8 +99,9 @@ down the entire interface via `listener.close()`.
 You can authenticate incoming transports however you like (e.g. checking a 
 header on the upgrade request for websockets). However, the underlying sync
 protocol needs to know what the authenticated peer ID is in order to ensure
-that the underlying messages are from the expected peer. This in turn allows
- the announce policy to be enforced.
+that the underlying messages are from the expected peer. This lets a
+[share policy](share-policy.md) authorize a document's access against an
+authenticated identity.
 
 Use `expected_peer_id=PeerId.from_string(authenticated_identity)` on
 `add_dialer()` or `listener.accept()` to bind the Automerge handshake to an

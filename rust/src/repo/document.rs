@@ -60,6 +60,17 @@ pub struct PyHubToDocMsg {
 
 #[pymethods]
 impl PyHubToDocMsg {
+    /// Apply permissions to all connections to this peer, including initial checks.
+    #[staticmethod]
+    fn update_share_policy(
+        peer_id: super::types::PyPeerId,
+        config: super::share::PyShareConfig,
+    ) -> Self {
+        Self {
+            inner: samod_core::actors::HubToDocMsg::update_share_policy(peer_id.0, config.0),
+        }
+    }
+
     fn __repr__(&self) -> String {
         "HubToDocMsg(...)".to_string()
     }
@@ -262,6 +273,20 @@ impl PyDocumentActor {
                 ))
             })?;
         Ok(PyDocActorResult { inner: result })
+    }
+
+    /// Peers with active connections to this actor, for policy subscriptions.
+    fn share_policy_peers(&self) -> Vec<super::types::PyPeerId> {
+        let actor = self.inner.lock().unwrap();
+        if actor.is_stopped() {
+            return Vec::new();
+        }
+        actor
+            .peers()
+            .keys()
+            .filter_map(|id| actor.conn_peer_id(*id))
+            .map(super::types::PyPeerId)
+            .collect()
     }
 
     /// Handle completion of an IO operation
