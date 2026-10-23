@@ -40,11 +40,14 @@ search = await repo.search_for_doc(url)
 - `phase`: `DocSearchPhase.Loading`, `Searching`, or `Ready`.
 - `peers`: a copy of the per-connection request-state dictionary, populated during
   `Searching`. Values are `PeerRequestState.Requested`, `Unavailable`, `Syncing`,
-  or `Available`.
+  `Available`, or `BlockedByPolicy`. The latter means our local
+  [share policy](share-policy.md) prevents fetching from that peer; remote
+  denial is reported as unavailable.
 - `pending_connections`: a copy of the list of connector URL strings that may
   still supply the document.
 - `is_currently_unavailable()`: true when local loading has finished, no potential
-  connections are pending, and all consulted peers report unavailability.
+  connections are pending, and all consulted peers are unavailable or blocked
+  by local policy.
   This can be true when there are no peers; it is **not** a permanent failure.
 
 Older snapshots do not change when new updates arrive. Changing the returned

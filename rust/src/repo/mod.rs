@@ -15,6 +15,7 @@ pub mod hub_results;
 pub mod io;
 pub mod loader;
 pub mod search;
+pub mod share;
 pub mod storage;
 pub mod types;
 
@@ -28,6 +29,7 @@ pub use hub_results::*;
 pub use io::*;
 pub use loader::*;
 pub use search::*;
+pub use share::*;
 pub use storage::*;
 pub use types::*;
 
@@ -49,6 +51,13 @@ pub fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStorageTaskDelete>()?;
     m.add_class::<PyStorageResult>()?;
 
+    // Sharing policies
+    m.add_class::<PyShareAccess>()?;
+    m.add_class::<PyShareConfig>()?;
+    m.add_class::<PyCheckSharePolicyAction>()?;
+    m.add_class::<PyDocumentIoResultCheckSharePolicy>()?;
+    m.add_class::<PyCheckSharePolicyResultPayload>()?;
+
     // IO types
     m.add_class::<PyIoTaskId>()?;
 
@@ -56,11 +65,9 @@ pub fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStorageTaskAction>()?;
     m.add_class::<PySendAction>()?;
     m.add_class::<PyDisconnectAction>()?;
-    m.add_class::<PyCheckAnnouncePolicyAction>()?;
 
     // Payload classes
     m.add_class::<PyStorageResultPayload>()?;
-    m.add_class::<PyCheckAnnouncePolicyResultPayload>()?;
     m.add_class::<PySendResultPayload>()?;
     m.add_class::<PyDisconnectResultPayload>()?;
 
@@ -68,7 +75,6 @@ pub fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHubIoResultSend>()?;
     m.add_class::<PyHubIoResultDisconnect>()?;
     m.add_class::<PyDocumentIoResultStorage>()?;
-    m.add_class::<PyDocumentIoResultCheckAnnouncePolicy>()?;
 
     // IoTask and IoResult
     m.add_class::<PyIoTask>()?;

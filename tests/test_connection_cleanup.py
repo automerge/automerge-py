@@ -5,23 +5,19 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_connection_cleanup_with_deny_policy(memory_connection):
-    """Test that connection cleanup works correctly with announce policy.
+    """Test that connection cleanup works correctly with a share policy.
 
     This test verifies that when connectors are closed,
     the Hub is properly notified so it stops emitting SendActions for
     those connections.
     """
     import asyncio
-    from automerge.repo import Repo, InMemoryStorage
-
-    # Add a deny-all policy to Repo A
-    async def deny_all_policy(document_id: str, peer_id: str) -> bool:
-        return False
+    from automerge.repo import Repo, InMemoryStorage, ShareConfig
 
     storage_a = InMemoryStorage()
     storage_b = InMemoryStorage()
 
-    repo_a = await Repo.load(storage_a, announce_policy=deny_all_policy)
+    repo_a = await Repo.load(storage_a, share_policy=ShareConfig.none())
     repo_b = await Repo.load(storage_b)
 
     async with repo_a, repo_b:

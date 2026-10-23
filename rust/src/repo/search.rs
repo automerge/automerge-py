@@ -20,6 +20,7 @@ pub enum PyPeerRequestState {
     Unavailable,
     Syncing,
     Available,
+    BlockedByPolicy,
 }
 
 #[pyclass(name = "DocSearch", frozen)]
@@ -48,6 +49,9 @@ impl PyDocSearch {
                     samod_core::PeerRequestState::Unavailable => PyPeerRequestState::Unavailable,
                     samod_core::PeerRequestState::Syncing => PyPeerRequestState::Syncing,
                     samod_core::PeerRequestState::Available => PyPeerRequestState::Available,
+                    samod_core::PeerRequestState::BlockedByPolicy => {
+                        PyPeerRequestState::BlockedByPolicy
+                    }
                 };
                 dict.set_item(PyConnectionId(*connection_id), state)?;
             }
