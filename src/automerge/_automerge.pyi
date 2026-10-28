@@ -39,6 +39,9 @@ class Document:
     def get(
         self, obj_id: bytes, prop: str | int, heads: Optional[list[bytes]] = None
     ) -> Optional[tuple[Value, bytes]]: ...
+    def get_all(
+        self, obj_id: bytes, prop: str | int, heads: Optional[list[bytes]] = None
+    ) -> list[tuple[Value, bytes]]: ...
     def keys(self, obj_id: bytes, heads: Optional[list[bytes]] = None) -> list[str]: ...
     def values(
         self, obj_id: bytes, heads: Optional[list[bytes]] = None
@@ -63,6 +66,9 @@ class Transaction:
     def get(
         self, obj_id: bytes, prop: str | int, heads: Optional[list[bytes]] = None
     ) -> Optional[tuple[ObjType | tuple[ScalarType, ScalarValue], bytes]]: ...
+    def get_all(
+        self, obj_id: bytes, prop: str | int, heads: Optional[list[bytes]] = None
+    ) -> list[tuple[Value, bytes]]: ...
     def keys(self, obj_id: bytes, heads: Optional[list[bytes]] = None) -> list[str]: ...
     def values(
         self, obj_id: bytes, heads: Optional[list[bytes]] = None

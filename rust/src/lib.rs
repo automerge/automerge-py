@@ -208,6 +208,37 @@ impl Inner {
         }
     }
 
+    fn get_all<'py>(
+        &self,
+        obj_id: PyObjId,
+        prop: PyProp,
+        heads: Option<Vec<PyChangeHash>>,
+    ) -> PyResult<Vec<(PyValue<'py>, PyObjId)>> {
+        if let Some(tx) = self.tx.as_ref() {
+            let res = match get_heads(heads) {
+                Some(heads) => tx.get_all_at(obj_id.0, prop.0, &heads),
+                None => tx.get_all(obj_id.0, prop.0),
+            }
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+            Ok(res
+                .into_iter()
+                .map(|(v, id)| (PyValue(v.into_owned()), PyObjId(id)))
+                .collect())
+        } else {
+            self.with_doc(|doc| {
+                let res = match get_heads(heads) {
+                    Some(heads) => doc.get_all_at(obj_id.0, prop.0, &heads),
+                    None => doc.get_all(obj_id.0, prop.0),
+                }
+                .map_err(|e| PyException::new_err(e.to_string()))?;
+                Ok(res
+                    .into_iter()
+                    .map(|(v, id)| (PyValue(v.into_owned()), PyObjId(id)))
+                    .collect())
+            })?
+        }
+    }
+
     fn keys(&self, obj_id: PyObjId, heads: Option<Vec<PyChangeHash>>) -> PyResult<Vec<String>> {
         if let Some(tx) = self.tx.as_ref() {
             let res = match get_heads(heads) {
@@ -648,6 +679,23 @@ impl Document {
         inner.marks(obj_id, heads)
     }
 
+    /// Return all values at a property, including conflicts, as (value, id) pairs.
+    /// Missing properties return an empty list. Optional heads select a historical
+    /// snapshot, using the same value and ID representation as get().
+    #[pyo3(signature=(obj_id, prop, heads=None))]
+    fn get_all(
+        &self,
+        obj_id: PyObjId,
+        prop: PyProp,
+        heads: Option<Vec<PyChangeHash>>,
+    ) -> PyResult<Vec<(PyValue<'_>, PyObjId)>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.get_all(obj_id, prop, heads)
+    }
+
     fn fork(&self) -> PyResult<Self> {
         let inner = self
             .inner
@@ -1000,6 +1048,23 @@ impl Transaction {
             .read()
             .map_err(|e| PyException::new_err(e.to_string()))?;
         inner.marks(obj_id, heads)
+    }
+
+    /// Return all values at a property, including conflicts, as (value, id) pairs.
+    /// Missing properties return an empty list. Optional heads select a historical
+    /// snapshot, using the same value and ID representation as get().
+    #[pyo3(signature=(obj_id, prop, heads=None))]
+    fn get_all(
+        &self,
+        obj_id: PyObjId,
+        prop: PyProp,
+        heads: Option<Vec<PyChangeHash>>,
+    ) -> PyResult<Vec<(PyValue<'_>, PyObjId)>> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.get_all(obj_id, prop, heads)
     }
 
     fn put(

@@ -48,6 +48,40 @@ doc.merge(doc2)  # `doc` now contains {"colours": ["green", "red"]}
 For synchronization without `Repo`, see [low-level sync](docs/sync.md), including
 publish-only peers, live read-only mode changes, and sync completion checks.
 
+### Reading conflicts
+
+The low-level `get()` method returns one deterministic winner when concurrent
+writes conflict. Use `doc.get_all(obj_id, prop, heads=None)` to inspect every
+value instead:
+
+```py
+from automerge.core import Document, ROOT, ScalarType
+
+left = Document()
+right = left.fork()
+with left.transaction() as tx:
+    tx.put(ROOT, "colour", ScalarType.Str, "blue")
+with right.transaction() as tx:
+    tx.put(ROOT, "colour", ScalarType.Str, "red")
+left.merge(right)
+
+conflicts = left.get_all(ROOT, "colour")
+assert sorted(value[1] for value, _ in conflicts) == ["blue", "red"]
+```
+
+Each result is a `(value, id)` pair, using the same representation as `get()`:
+scalars are `(ScalarType, Python value)` tuples; objects are `ObjType` values
+whose byte IDs can be used to read their contents. Scalar IDs identify the
+operations that assigned the values, so equal concurrent values can still
+have distinct IDs.
+
+Missing or deleted properties return `[]`; an unconflicted property returns
+one pair. Pass a map key or list index as `prop`, and optional change hashes
+as `heads` for historical reads (`heads=[]` selects the empty history).
+`Transaction.get_all()` also sees pending writes; passing heads selects the
+historical snapshot instead. Writing a new value after observing all conflicting
+writes resolves the conflict.
+
 ### Using the High-Level API
 
 The `automerge.Document` class provides a more Pythonic interface using proxies:
