@@ -16,6 +16,9 @@
 - `automerge.core.Document.load_incremental()` to import encoded changes, change
   bundles, or saved documents, and `get_missing_deps()` to inspect missing change
   dependencies. The `Change` type is now exported from `automerge.core`.
+- `automerge.core.Document.get_all(obj_id, prop, heads=None)` and
+  `Transaction.get_all()` return all conflicting values with their IDs,
+  including historical reads using optional heads.
 - Low-level read-only sync: `SyncState.new_read_only()`, `set_read_only()`,
   and `is_peer_read_only()` support publish-only peers and live mode changes
   without `Repo`. Added `MessageFlag`, read-only `Message.flags`, and
