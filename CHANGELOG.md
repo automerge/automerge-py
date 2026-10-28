@@ -16,6 +16,10 @@
 - `automerge.core.Document.load_incremental()` to import encoded changes, change
   bundles, or saved documents, and `get_missing_deps()` to inspect missing change
   dependencies. The `Change` type is now exported from `automerge.core`.
+- Low-level read-only sync: `SyncState.new_read_only()`, `set_read_only()`,
+  and `is_peer_read_only()` support publish-only peers and live mode changes
+  without `Repo`. Added `MessageFlag`, read-only `Message.flags`, and
+  `Document.has_our_changes()` in `automerge.core`. See [sync](docs/sync.md).
 - Commit metadata: `Document.transaction(message=..., time=...)`,
   `automerge.Document.change(message=..., time=...)`, and
   `DocHandle.change(message=..., time=...)` now set a change message and
