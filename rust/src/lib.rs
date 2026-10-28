@@ -796,6 +796,15 @@ impl Document {
         inner.with_doc(|doc| doc.generate_sync_message(&mut sync_state.0).map(PyMessage))
     }
 
+    /// Whether the peer represented by this sync state has all our changes.
+    fn has_our_changes(&self, sync_state: &PySyncState) -> PyResult<bool> {
+        let inner = self
+            .inner
+            .read()
+            .map_err(|e| PyException::new_err(e.to_string()))?;
+        inner.with_doc(|doc| doc.has_our_changes(&sync_state.0))
+    }
+
     fn receive_sync_message(
         &mut self,
         sync_state: &mut PySyncState,
@@ -1177,6 +1186,8 @@ fn import_scalar(
     })
 }
 
+/// Sync state for one document/peer pair. Read-only mode rejects incoming
+/// changes but still publishes local changes; it does not prevent local edits.
 #[pyclass(name = "SyncState")]
 struct PySyncState(am::sync::State);
 
@@ -1186,6 +1197,33 @@ impl PySyncState {
     pub fn new() -> PySyncState {
         PySyncState(am::sync::State::new())
     }
+
+    /// Create a publish-only sync state that ignores incoming changes.
+    #[staticmethod]
+    pub fn new_read_only() -> PySyncState {
+        PySyncState(am::sync::State::new_read_only())
+    }
+
+    /// Toggle acceptance of incoming changes. Switching to read-write triggers
+    /// a fresh sync exchange so the peer resends previously ignored changes.
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.0.set_read_only(read_only);
+    }
+
+    /// Whether the remote peer has advertised that it ignores incoming changes.
+    /// False until the peer advertises read-only mode in a received message.
+    pub fn is_peer_read_only(&self) -> bool {
+        self.0.is_peer_read_only()
+    }
+}
+
+/// Known per-message flags. Message format support is negotiated separately.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[pyclass(name = "MessageFlag", eq, eq_int)]
+enum PyMessageFlag {
+    SyncReset = am::sync::MessageFlags::SYNC_RESET as isize,
+    ReadOnly = am::sync::MessageFlags::READ_ONLY as isize,
+    SupportsSyncReset = am::sync::MessageFlags::SUPPORTS_SYNC_RESET as isize,
 }
 
 #[pyclass(name = "Message")]
@@ -1193,6 +1231,25 @@ struct PyMessage(am::sync::Message);
 
 #[pymethods]
 impl PyMessage {
+    /// Known flags, or None for a legacy message without a flags section.
+    /// Returns a fresh list; modifying it does not modify the message.
+    #[getter]
+    pub fn flags(&self) -> Option<Vec<PyMessageFlag>> {
+        self.0.flags.map(|flags| {
+            [
+                (am::sync::MessageFlags::SYNC_RESET, PyMessageFlag::SyncReset),
+                (am::sync::MessageFlags::READ_ONLY, PyMessageFlag::ReadOnly),
+                (
+                    am::sync::MessageFlags::SUPPORTS_SYNC_RESET,
+                    PyMessageFlag::SupportsSyncReset,
+                ),
+            ]
+            .into_iter()
+            .filter_map(|(bit, flag)| flags.contains(bit).then_some(flag))
+            .collect()
+        })
+    }
+
     pub fn encode<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
         PyBytes::new(py, &self.0.clone().encode())
     }
@@ -1224,6 +1281,7 @@ fn _automerge(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyObjType>()?;
     m.add_class::<PyScalarType>()?;
     m.add_class::<PyExpandMark>()?;
+    m.add_class::<PyMessageFlag>()?;
 
     // Constants
     m.add("ROOT", PyObjId(am::ROOT))?;

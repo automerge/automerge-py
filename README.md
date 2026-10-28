@@ -45,6 +45,9 @@ with doc.transaction() as tx:
 doc.merge(doc2)  # `doc` now contains {"colours": ["green", "red"]}
 ```
 
+For synchronization without `Repo`, see [low-level sync](docs/sync.md), including
+publish-only peers, live read-only mode changes, and sync completion checks.
+
 ### Using the High-Level API
 
 The `automerge.Document` class provides a more Pythonic interface using proxies:
